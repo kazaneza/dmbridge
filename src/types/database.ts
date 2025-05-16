@@ -1,7 +1,7 @@
 export interface DatabaseConnection {
   id: string;
   name: string;
-  type: 'mysql' | 'postgresql' | 'mongodb' | 'sqlite';
+  type: 'mssql' | 'oracle' | 'sqlite';
   host?: string;
   port?: number;
   username?: string;

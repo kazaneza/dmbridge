@@ -19,9 +19,9 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
     initialConnection || {
       id: uuidv4(),
       name: '',
-      type: 'postgresql',
+      type: 'mssql',
       host: 'localhost',
-      port: 5432,
+      port: 1433,
       username: '',
       password: '',
       database: '',
@@ -38,6 +38,14 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       ...prev,
       [name]: value
     }));
+
+    // Set default port based on database type
+    if (name === 'type') {
+      setConnection(prev => ({
+        ...prev,
+        port: value === 'oracle' ? 1521 : value === 'mssql' ? 1433 : undefined
+      }));
+    }
   };
 
   const handleNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -64,6 +72,19 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
     onSave(connection as DatabaseConnection);
   };
 
+  const getConnectionStringPlaceholder = () => {
+    switch (connection.type) {
+      case 'mssql':
+        return 'Driver={ODBC Driver 17 for SQL Server};Server=localhost,1433;Database=master;Uid=sa;Pwd=yourpassword';
+      case 'oracle':
+        return 'Driver={Oracle};DBQ=localhost:1521/ORCLPDB1;Uid=system;Pwd=yourpassword';
+      case 'sqlite':
+        return 'Path to SQLite database file';
+      default:
+        return '';
+    }
+  };
+
   const renderConnectionTypeFields = () => {
     if (useConnectionString) {
       return (
@@ -76,7 +97,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             name="connectionString"
             value={connection.connectionString || ''}
             onChange={handleChange}
-            placeholder="e.g. postgresql://username:password@localhost:5432/database"
+            placeholder={getConnectionStringPlaceholder()}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
           />
         </div>
@@ -110,7 +131,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
               name="port"
               value={connection.port || ''}
               onChange={handleNumberChange}
-              placeholder="5432"
+              placeholder={connection.type === 'oracle' ? '1521' : '1433'}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
               disabled={connection.type === 'sqlite'}
             />
@@ -149,7 +170,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
 
         <div className="mt-4">
           <label className="block text-sm font-medium text-gray-700">
-            Database
+            {connection.type === 'oracle' ? 'Service Name' : 'Database'}
           </label>
           <input
             type="text"
@@ -157,7 +178,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             value={connection.database || ''}
             onChange={handleChange}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
-            placeholder={connection.type === 'sqlite' ? 'Path to SQLite file' : 'Database name'}
+            placeholder={connection.type === 'oracle' ? 'ORCLPDB1' : connection.type === 'sqlite' ? 'Path to SQLite file' : 'Database name'}
           />
         </div>
       </>
@@ -190,7 +211,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             value={connection.name}
             onChange={handleChange}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
-            placeholder="e.g. Production PostgreSQL"
+            placeholder="e.g. Production SQL Server"
             required
           />
         </div>
@@ -205,9 +226,8 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             onChange={handleChange}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
           >
-            <option value="postgresql">PostgreSQL</option>
-            <option value="mysql">MySQL</option>
-            <option value="mongodb">MongoDB</option>
+            <option value="mssql">Microsoft SQL Server</option>
+            <option value="oracle">Oracle</option>
             <option value="sqlite">SQLite</option>
           </select>
         </div>

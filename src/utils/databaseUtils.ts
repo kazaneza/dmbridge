@@ -6,37 +6,49 @@ import {
   DatabaseSchema 
 } from '../types/database';
 
-// Mock function to simulate connecting to a database
+// Function to connect to the backend API
 export const connectToDatabase = async (
   connection: DatabaseConnection
 ): Promise<DatabaseConnection> => {
-  // In a real application, this would connect to the actual database
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        ...connection,
-        connected: true,
-        error: undefined
-      });
-    }, 1000);
-  });
+  try {
+    const response = await fetch('http://localhost:8000/api/connections/test', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(connection),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to connect to database');
+    }
+
+    return {
+      ...connection,
+      connected: true,
+      error: undefined
+    };
+  } catch (error) {
+    return {
+      ...connection,
+      connected: false,
+      error: error instanceof Error ? error.message : 'Failed to connect to database'
+    };
+  }
 };
 
-// Mock function to simulate disconnecting from a database
+// Function to disconnect from a database
 export const disconnectFromDatabase = async (
   connection: DatabaseConnection
 ): Promise<DatabaseConnection> => {
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        ...connection,
-        connected: false
-      });
-    }, 500);
-  });
+  return {
+    ...connection,
+    connected: false
+  };
 };
 
-// Mock function to retrieve schema information
+// Function to retrieve schema information
 export const fetchDatabaseSchema = async (
   connection: DatabaseConnection
 ): Promise<DatabaseSchema> => {
@@ -86,24 +98,17 @@ export const validateConnectionParams = (connection: Partial<DatabaseConnection>
   }
   
   if (!connection.database) {
-    return 'Database name is required';
+    return connection.type === 'oracle' ? 'Service Name is required' : 'Database name is required';
   }
   
   return null; // Connection is valid
 };
 
-// Mock function to estimate migration time
+// Function to estimate migration time
 export const estimateMigrationTime = (
   tables: DatabaseTable[],
   batchSize: number
 ): number => {
-  // This would be more sophisticated in a real app, considering:
-  // - Network latency
-  // - Database performance
-  // - Table sizes
-  // - Indexes
-  // - Constraints
-  
   const totalRows = tables.reduce((sum, table) => sum + (table.rowCount || 0), 0);
   const rowsPerSecond = 1000; // Mock value
   const estimatedSeconds = Math.ceil(totalRows / rowsPerSecond);
@@ -114,67 +119,36 @@ export const estimateMigrationTime = (
 // Helper function to generate mock tables based on database type
 const getMockTablesForType = (type: DatabaseConnection['type'], dbName: string): DatabaseTable[] => {
   switch (type) {
-    case 'mysql':
+    case 'mssql':
       return [
-        createMockTable('customers', 'public', 10000, [
-          createMockColumn('id', 'int', false, true),
-          createMockColumn('name', 'varchar(255)', false, false),
-          createMockColumn('email', 'varchar(255)', false, false),
-          createMockColumn('created_at', 'datetime', false, false),
+        createMockTable('Customers', 'dbo', 10000, [
+          createMockColumn('CustomerID', 'int', false, true),
+          createMockColumn('Name', 'nvarchar(100)', false, false),
+          createMockColumn('Email', 'nvarchar(255)', false, false),
+          createMockColumn('CreatedAt', 'datetime', false, false),
         ]),
-        createMockTable('orders', 'public', 50000, [
-          createMockColumn('id', 'int', false, true),
-          createMockColumn('customer_id', 'int', false, false),
-          createMockColumn('amount', 'decimal(10,2)', false, false),
-          createMockColumn('status', 'varchar(50)', false, false),
-          createMockColumn('created_at', 'datetime', false, false),
-        ]),
-        createMockTable('products', 'public', 5000, [
-          createMockColumn('id', 'int', false, true),
-          createMockColumn('name', 'varchar(255)', false, false),
-          createMockColumn('price', 'decimal(10,2)', false, false),
-          createMockColumn('stock', 'int', true, false),
-          createMockColumn('category', 'varchar(100)', true, false),
+        createMockTable('Orders', 'dbo', 50000, [
+          createMockColumn('OrderID', 'int', false, true),
+          createMockColumn('CustomerID', 'int', false, false),
+          createMockColumn('Amount', 'decimal(18,2)', false, false),
+          createMockColumn('Status', 'nvarchar(50)', false, false),
+          createMockColumn('OrderDate', 'datetime', false, false),
         ]),
       ];
-    case 'postgresql':
+    case 'oracle':
       return [
-        createMockTable('users', 'public', 15000, [
-          createMockColumn('id', 'uuid', false, true),
-          createMockColumn('email', 'text', false, false),
-          createMockColumn('name', 'text', true, false),
-          createMockColumn('created_at', 'timestamp with time zone', false, false),
+        createMockTable('EMPLOYEES', 'HR', 15000, [
+          createMockColumn('EMPLOYEE_ID', 'NUMBER', false, true),
+          createMockColumn('FIRST_NAME', 'VARCHAR2(50)', true, false),
+          createMockColumn('LAST_NAME', 'VARCHAR2(50)', false, false),
+          createMockColumn('EMAIL', 'VARCHAR2(100)', false, false),
+          createMockColumn('HIRE_DATE', 'DATE', false, false),
         ]),
-        createMockTable('posts', 'public', 75000, [
-          createMockColumn('id', 'uuid', false, true),
-          createMockColumn('user_id', 'uuid', false, false),
-          createMockColumn('title', 'text', false, false),
-          createMockColumn('content', 'text', false, false),
-          createMockColumn('published', 'boolean', false, false),
-          createMockColumn('created_at', 'timestamp with time zone', false, false),
-        ]),
-        createMockTable('comments', 'public', 120000, [
-          createMockColumn('id', 'uuid', false, true),
-          createMockColumn('post_id', 'uuid', false, false),
-          createMockColumn('user_id', 'uuid', false, false),
-          createMockColumn('content', 'text', false, false),
-          createMockColumn('created_at', 'timestamp with time zone', false, false),
-        ]),
-      ];
-    case 'mongodb':
-      return [
-        createMockTable('users', undefined, 20000, [
-          createMockColumn('_id', 'ObjectID', false, true),
-          createMockColumn('email', 'String', false, false),
-          createMockColumn('name', 'String', true, false),
-          createMockColumn('createdAt', 'Date', false, false),
-        ]),
-        createMockTable('items', undefined, 100000, [
-          createMockColumn('_id', 'ObjectID', false, true),
-          createMockColumn('name', 'String', false, false),
-          createMockColumn('price', 'Number', false, false),
-          createMockColumn('categories', 'Array', true, false),
-          createMockColumn('createdAt', 'Date', false, false),
+        createMockTable('DEPARTMENTS', 'HR', 5000, [
+          createMockColumn('DEPARTMENT_ID', 'NUMBER', false, true),
+          createMockColumn('DEPARTMENT_NAME', 'VARCHAR2(100)', false, false),
+          createMockColumn('MANAGER_ID', 'NUMBER', true, false),
+          createMockColumn('LOCATION_ID', 'NUMBER', true, false),
         ]),
       ];
     case 'sqlite':
