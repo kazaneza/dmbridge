@@ -6,6 +6,40 @@ import {
   DatabaseSchema 
 } from '../types/database';
 
+// Function to save a connection to the backend
+export const saveConnection = async (connection: DatabaseConnection): Promise<void> => {
+  try {
+    const response = await fetch('http://localhost:8000/api/connections', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(connection),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to save connection');
+    }
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to save connection');
+  }
+};
+
+// Function to load saved connections from the backend
+export const loadConnections = async (): Promise<DatabaseConnection[]> => {
+  try {
+    const response = await fetch('http://localhost:8000/api/connections');
+    if (!response.ok) {
+      throw new Error('Failed to load connections');
+    }
+    return await response.json();
+  } catch (error) {
+    console.error('Error loading connections:', error);
+    return [];
+  }
+};
+
 // Function to connect to the backend API
 export const connectToDatabase = async (
   connection: DatabaseConnection

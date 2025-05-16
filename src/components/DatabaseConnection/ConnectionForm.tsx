@@ -89,7 +89,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
 
     // For Oracle, if not using connection string, build it
     if (connection.type === 'oracle' && !useConnectionString) {
-      const oracleConnStr = `DRIVER={Oracle in instantclient_21_1};DBQ=${connection.host}:${connection.port}/${connection.database};Uid=${connection.username};Pwd=${connection.password}`;
+      const oracleConnStr = `${connection.username}/${connection.password}@${connection.host}:${connection.port}/${connection.database}`;
       connection.connectionString = oracleConnStr;
     }
     
@@ -101,7 +101,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       case 'mssql':
         return 'Driver={ODBC Driver 17 for SQL Server};Server=localhost,1433;Database=master;Uid=sa;Pwd=yourpassword';
       case 'oracle':
-        return 'DRIVER={Oracle in instantclient_21_1};DBQ=localhost:1521/ORCLPDB1;Uid=system;Pwd=yourpassword';
+        return 'username/password@hostname:port/service_name';
       case 'sqlite':
         return 'Path to SQLite database file';
       default:
@@ -126,7 +126,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
           />
           <p className="mt-1 text-sm text-gray-500">
             {connection.type === 'oracle' ? 
-              'For Oracle, ensure you have Oracle Instant Client installed and the ORACLE_HOME environment variable set.' :
+              'For Oracle, use the format: username/password@hostname:port/service_name' :
               connection.type === 'mssql' ?
               'For SQL Server, ensure you have the ODBC Driver 17 for SQL Server installed.' :
               ''}
@@ -210,11 +210,11 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             value={connection.database || ''}
             onChange={handleChange}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
-            placeholder={connection.type === 'oracle' ? 'ORCLPDB1' : connection.type === 'sqlite' ? 'Path to SQLite file' : 'Database name'}
+            placeholder={connection.type === 'oracle' ? 't24prod' : connection.type === 'sqlite' ? 'Path to SQLite file' : 'Database name'}
           />
           {connection.type === 'oracle' && (
             <p className="mt-1 text-sm text-gray-500">
-              The Oracle service name (e.g., ORCLPDB1, XE)
+              Enter your Oracle service name (e.g., t24prod)
             </p>
           )}
         </div>

@@ -1,18 +1,42 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { DatabaseConnection } from '../types/database';
 import ConnectionForm from '../components/DatabaseConnection/ConnectionForm';
 import ConnectionCard from '../components/DatabaseConnection/ConnectionCard';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, RefreshCw } from 'lucide-react';
+import { loadConnections, saveConnection } from '../utils/databaseUtils';
 
 const ConnectionsPage: React.FC = () => {
   const { state, dispatch } = useAppContext();
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingConnection, setEditingConnection] = useState<DatabaseConnection | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleAddConnection = (connection: DatabaseConnection) => {
-    dispatch({ type: 'ADD_CONNECTION', payload: connection });
-    setShowAddForm(false);
+  useEffect(() => {
+    loadSavedConnections();
+  }, []);
+
+  const loadSavedConnections = async () => {
+    setIsLoading(true);
+    try {
+      const connections = await loadConnections();
+      dispatch({ type: 'SET_CONNECTIONS', payload: connections });
+    } catch (error) {
+      console.error('Failed to load connections:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddConnection = async (connection: DatabaseConnection) => {
+    try {
+      await saveConnection(connection);
+      dispatch({ type: 'ADD_CONNECTION', payload: connection });
+      setShowAddForm(false);
+    } catch (error) {
+      console.error('Failed to save connection:', error);
+      // You might want to show an error message to the user here
+    }
   };
 
   const handleUpdateConnection = (connection: DatabaseConnection) => {
@@ -70,6 +94,15 @@ const ConnectionsPage: React.FC = () => {
       );
     }
 
+    if (isLoading) {
+      return (
+        <div className="flex justify-center items-center py-12">
+          <RefreshCw className="animate-spin h-8 w-8 text-teal-600 mr-3" />
+          <span className="text-lg font-medium text-gray-700">Loading connections...</span>
+        </div>
+      );
+    }
+
     if (state.connections.length === 0) {
       return (
         <div className="text-center py-12">
@@ -90,13 +123,22 @@ const ConnectionsPage: React.FC = () => {
       <>
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-gray-900">Database Connections</h2>
-          <button
-            onClick={() => setShowAddForm(true)}
-            className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
-          >
-            <PlusCircle className="mr-1.5 h-4 w-4" />
-            Add Connection
-          </button>
+          <div className="flex space-x-4">
+            <button
+              onClick={loadSavedConnections}
+              className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
+            >
+              <RefreshCw className="mr-1.5 h-4 w-4" />
+              Refresh
+            </button>
+            <button
+              onClick={() => setShowAddForm(true)}
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
+            >
+              <PlusCircle className="mr-1.5 h-4 w-4" />
+              Add Connection
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

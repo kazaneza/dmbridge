@@ -159,28 +159,35 @@ async def test_connection(connection: Connection):
                     f"PWD={connection.password}"
                 )
             elif connection.type == 'oracle':
-                conn_str = (
-                    f"DRIVER={{Oracle in instantclient_21_1}};"
-                    f"DBQ={connection.host}:{connection.port}/{connection.database};"
-                    f"Uid={connection.username};"
-                    f"Pwd={connection.password}"
-                )
+                # Try both EZ Connect and full service name formats
+                try:
+                    # First try EZ Connect format
+                    conn_str = f"{connection.username}/{connection.password}@{connection.host}:{connection.port}/{connection.database}"
+                    import cx_Oracle
+                    conn = cx_Oracle.connect(conn_str)
+                except Exception as e:
+                    if "ORA-12514" in str(e):
+                        # If EZ Connect fails, try with full service name
+                        conn_str = f"{connection.username}/{connection.password}@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={connection.host})(PORT={connection.port}))(CONNECT_DATA=(SERVICE_NAME={connection.database})))"
+                        conn = cx_Oracle.connect(conn_str)
+                    else:
+                        raise e
+                return {"success": True, "message": "Connection successful"}
             elif connection.type == 'sqlite':
                 return {"success": True, "message": "SQLite connection validated"}
         
-        # Test connection
-        conn = pyodbc.connect(conn_str, timeout=5)
-        cursor = conn.cursor()
+        # Test connection for non-Oracle databases
+        if connection.type != 'oracle':
+            conn = pyodbc.connect(conn_str, timeout=5)
+            cursor = conn.cursor()
+            
+            if connection.type == 'mssql':
+                cursor.execute('SELECT @@VERSION')
+            
+            cursor.fetchone()
+            cursor.close()
+            conn.close()
         
-        # Test query based on database type
-        if connection.type == 'mssql':
-            cursor.execute('SELECT @@VERSION')
-        elif connection.type == 'oracle':
-            cursor.execute('SELECT * FROM v$version')
-        
-        cursor.fetchone()
-        cursor.close()
-        conn.close()
         return {"success": True, "message": "Connection successful"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
