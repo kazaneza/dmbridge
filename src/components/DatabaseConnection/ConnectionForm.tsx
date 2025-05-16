@@ -43,7 +43,9 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
     if (name === 'type') {
       setConnection(prev => ({
         ...prev,
-        port: value === 'oracle' ? 1521 : value === 'mssql' ? 1433 : undefined
+        port: value === 'oracle' ? 1521 : value === 'mssql' ? 1433 : undefined,
+        // Clear connection string when switching types
+        connectionString: ''
       }));
     }
   };
@@ -58,6 +60,22 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
 
   const handleToggleConnectionString = () => {
     setUseConnectionString(!useConnectionString);
+    // Clear either connection string or individual fields when toggling
+    if (!useConnectionString) {
+      setConnection(prev => ({
+        ...prev,
+        connectionString: '',
+      }));
+    } else {
+      setConnection(prev => ({
+        ...prev,
+        host: undefined,
+        port: undefined,
+        username: undefined,
+        password: undefined,
+        database: undefined,
+      }));
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -68,6 +86,12 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       setError(validationError);
       return;
     }
+
+    // For Oracle, if not using connection string, build it
+    if (connection.type === 'oracle' && !useConnectionString) {
+      const oracleConnStr = `DRIVER={Oracle in instantclient_21_1};DBQ=${connection.host}:${connection.port}/${connection.database};Uid=${connection.username};Pwd=${connection.password}`;
+      connection.connectionString = oracleConnStr;
+    }
     
     onSave(connection as DatabaseConnection);
   };
@@ -77,7 +101,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
       case 'mssql':
         return 'Driver={ODBC Driver 17 for SQL Server};Server=localhost,1433;Database=master;Uid=sa;Pwd=yourpassword';
       case 'oracle':
-        return 'Driver={Oracle};DBQ=localhost:1521/ORCLPDB1;Uid=system;Pwd=yourpassword';
+        return 'DRIVER={Oracle in instantclient_21_1};DBQ=localhost:1521/ORCLPDB1;Uid=system;Pwd=yourpassword';
       case 'sqlite':
         return 'Path to SQLite database file';
       default:
@@ -100,6 +124,13 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             placeholder={getConnectionStringPlaceholder()}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
           />
+          <p className="mt-1 text-sm text-gray-500">
+            {connection.type === 'oracle' ? 
+              'For Oracle, ensure you have Oracle Instant Client installed and the ORACLE_HOME environment variable set.' :
+              connection.type === 'mssql' ?
+              'For SQL Server, ensure you have the ODBC Driver 17 for SQL Server installed.' :
+              ''}
+          </p>
         </div>
       );
     }
@@ -148,6 +179,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
               name="username"
               value={connection.username || ''}
               onChange={handleChange}
+              placeholder={connection.type === 'oracle' ? 'system' : 'sa'}
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
               disabled={connection.type === 'sqlite'}
             />
@@ -180,6 +212,11 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
             placeholder={connection.type === 'oracle' ? 'ORCLPDB1' : connection.type === 'sqlite' ? 'Path to SQLite file' : 'Database name'}
           />
+          {connection.type === 'oracle' && (
+            <p className="mt-1 text-sm text-gray-500">
+              The Oracle service name (e.g., ORCLPDB1, XE)
+            </p>
+          )}
         </div>
       </>
     );
@@ -211,7 +248,7 @@ const ConnectionForm: React.FC<ConnectionFormProps> = ({
             value={connection.name}
             onChange={handleChange}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-teal-500 focus:ring-teal-500"
-            placeholder="e.g. Production SQL Server"
+            placeholder="e.g. Production Oracle DB"
             required
           />
         </div>

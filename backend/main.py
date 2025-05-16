@@ -159,12 +159,11 @@ async def test_connection(connection: Connection):
                     f"PWD={connection.password}"
                 )
             elif connection.type == 'oracle':
-                # Oracle connection string format: username/password@host:port/service_name
                 conn_str = (
-                    f"DRIVER={{Oracle}};"
+                    f"DRIVER={{Oracle in instantclient_21_1}};"
                     f"DBQ={connection.host}:{connection.port}/{connection.database};"
-                    f"UID={connection.username};"
-                    f"PWD={connection.password}"
+                    f"Uid={connection.username};"
+                    f"Pwd={connection.password}"
                 )
             elif connection.type == 'sqlite':
                 return {"success": True, "message": "SQLite connection validated"}
