@@ -1,8 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { 
   DatabaseConnection, 
-  DatabaseTable, 
-  DatabaseColumn,
+  DatabaseTable,
   DatabaseSchema 
 } from '../types/database';
 
@@ -82,20 +81,26 @@ export const disconnectFromDatabase = async (
   };
 };
 
-// Function to retrieve schema information
+// Function to retrieve schema information from the backend
 export const fetchDatabaseSchema = async (
   connection: DatabaseConnection
 ): Promise<DatabaseSchema> => {
-  // In a real application, this would query the database for tables and columns
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      const mockTables = getMockTablesForType(connection.type, connection.database || '');
-      resolve({
-        tables: mockTables,
-        loading: false
-      });
-    }, 1500);
-  });
+  try {
+    const response = await fetch(`http://localhost:8000/api/connections/${connection.id}/schema`);
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to fetch schema');
+    }
+    
+    const tables = await response.json();
+    return {
+      tables,
+      loading: false
+    };
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to fetch schema');
+  }
 };
 
 // Function to create a new database connection object
@@ -144,92 +149,8 @@ export const estimateMigrationTime = (
   batchSize: number
 ): number => {
   const totalRows = tables.reduce((sum, table) => sum + (table.rowCount || 0), 0);
-  const rowsPerSecond = 1000; // Mock value
+  const rowsPerSecond = 1000; // Estimated value
   const estimatedSeconds = Math.ceil(totalRows / rowsPerSecond);
   
   return Math.max(estimatedSeconds, 5); // Minimum 5 seconds
 };
-
-// Helper function to generate mock tables based on database type
-const getMockTablesForType = (type: DatabaseConnection['type'], dbName: string): DatabaseTable[] => {
-  switch (type) {
-    case 'mssql':
-      return [
-        createMockTable('Customers', 'dbo', 10000, [
-          createMockColumn('CustomerID', 'int', false, true),
-          createMockColumn('Name', 'nvarchar(100)', false, false),
-          createMockColumn('Email', 'nvarchar(255)', false, false),
-          createMockColumn('CreatedAt', 'datetime', false, false),
-        ]),
-        createMockTable('Orders', 'dbo', 50000, [
-          createMockColumn('OrderID', 'int', false, true),
-          createMockColumn('CustomerID', 'int', false, false),
-          createMockColumn('Amount', 'decimal(18,2)', false, false),
-          createMockColumn('Status', 'nvarchar(50)', false, false),
-          createMockColumn('OrderDate', 'datetime', false, false),
-        ]),
-      ];
-    case 'oracle':
-      return [
-        createMockTable('EMPLOYEES', 'HR', 15000, [
-          createMockColumn('EMPLOYEE_ID', 'NUMBER', false, true),
-          createMockColumn('FIRST_NAME', 'VARCHAR2(50)', true, false),
-          createMockColumn('LAST_NAME', 'VARCHAR2(50)', false, false),
-          createMockColumn('EMAIL', 'VARCHAR2(100)', false, false),
-          createMockColumn('HIRE_DATE', 'DATE', false, false),
-        ]),
-        createMockTable('DEPARTMENTS', 'HR', 5000, [
-          createMockColumn('DEPARTMENT_ID', 'NUMBER', false, true),
-          createMockColumn('DEPARTMENT_NAME', 'VARCHAR2(100)', false, false),
-          createMockColumn('MANAGER_ID', 'NUMBER', true, false),
-          createMockColumn('LOCATION_ID', 'NUMBER', true, false),
-        ]),
-      ];
-    case 'sqlite':
-      return [
-        createMockTable('users', undefined, 5000, [
-          createMockColumn('id', 'INTEGER', false, true),
-          createMockColumn('name', 'TEXT', false, false),
-          createMockColumn('email', 'TEXT', false, false),
-          createMockColumn('created_at', 'TEXT', false, false),
-        ]),
-        createMockTable('tasks', undefined, 15000, [
-          createMockColumn('id', 'INTEGER', false, true),
-          createMockColumn('user_id', 'INTEGER', false, false),
-          createMockColumn('title', 'TEXT', false, false),
-          createMockColumn('completed', 'INTEGER', false, false),
-          createMockColumn('created_at', 'TEXT', false, false),
-        ]),
-      ];
-    default:
-      return [];
-  }
-};
-
-// Helper functions to create mock tables and columns
-const createMockTable = (
-  name: string, 
-  schema: string | undefined, 
-  rowCount: number, 
-  columns: DatabaseColumn[]
-): DatabaseTable => ({
-  name,
-  schema,
-  rowCount,
-  size: Math.floor(rowCount * columns.length * 100),
-  columns,
-  selected: false,
-});
-
-const createMockColumn = (
-  name: string, 
-  type: string, 
-  nullable: boolean, 
-  isPrimaryKey: boolean
-): DatabaseColumn => ({
-  name,
-  type,
-  nullable,
-  isPrimaryKey,
-  selected: true, // By default, select all columns
-});

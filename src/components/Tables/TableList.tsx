@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Check, ChevronRight, ChevronDown, Table as TableIcon } from 'lucide-react';
+import { Search, Check, ChevronRight, ChevronDown, Table as TableIcon, Filter } from 'lucide-react';
 import { DatabaseTable } from '../../types/database';
 import { formatDuration } from '../../utils/migrationUtils';
 import { estimateMigrationTime } from '../../utils/databaseUtils';
@@ -17,6 +17,7 @@ const TableList: React.FC<TableListProps> = ({
 }) => {
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSelected, setShowSelected] = useState(false);
   
   const toggleExpand = (tableName: string, schema?: string) => {
     const key = schema ? `${schema}.${tableName}` : tableName;
@@ -36,44 +37,106 @@ const TableList: React.FC<TableListProps> = ({
       ? `${table.schema}.${table.name}` 
       : table.name;
     
-    return tableIdentifier.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = tableIdentifier.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter = !showSelected || table.selected;
+    
+    return matchesSearch && matchesFilter;
   });
   
   const selectedTables = tables.filter(table => table.selected);
   const totalEstimatedTime = estimateMigrationTime(selectedTables, 1000);
   
+  const handleSelectAll = (selected: boolean) => {
+    filteredTables.forEach(table => {
+      onSelectTable(table.name, table.schema, selected);
+    });
+  };
+  
+  const expandAll = () => {
+    const newExpandedState: Record<string, boolean> = {};
+    filteredTables.forEach(table => {
+      const key = table.schema ? `${table.schema}.${table.name}` : table.name;
+      newExpandedState[key] = true;
+    });
+    setExpandedTables(newExpandedState);
+  };
+  
+  const collapseAll = () => {
+    setExpandedTables({});
+  };
+  
   return (
     <div className="bg-white rounded-lg shadow-md overflow-hidden">
       <div className="p-4 bg-gray-50 border-b border-gray-200">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-800">
-            Available Tables
-          </h2>
-          <div className="flex items-center">
-            <span className="text-sm text-gray-500 mr-2">
-              {selectedTables.length} of {tables.length} selected
-            </span>
-            <div className="relative">
+        <div className="flex flex-col space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-gray-800">
+              Available Tables and Views
+            </h2>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => setShowSelected(!showSelected)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md ${
+                  showSelected 
+                    ? 'bg-teal-100 text-teal-800' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <Filter className="inline-block h-4 w-4 mr-1" />
+                Show Selected
+              </button>
+              <button
+                onClick={expandAll}
+                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                Expand All
+              </button>
+              <button
+                onClick={collapseAll}
+                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                Collapse All
+              </button>
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between">
+            <div className="relative flex-1 max-w-md">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <Search className="h-4 w-4 text-gray-400" />
               </div>
               <input
                 type="text"
-                placeholder="Search tables..."
+                placeholder="Search tables and views..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 pr-4 py-1.5 block w-full border border-gray-300 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500"
+                className="pl-10 pr-4 py-2 block w-full border border-gray-300 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500"
               />
+            </div>
+            
+            <div className="flex items-center space-x-4">
+              <button
+                onClick={() => handleSelectAll(true)}
+                className="px-3 py-1.5 text-sm font-medium text-teal-700 bg-teal-100 rounded-md hover:bg-teal-200"
+              >
+                Select All
+              </button>
+              <button
+                onClick={() => handleSelectAll(false)}
+                className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                Deselect All
+              </button>
             </div>
           </div>
         </div>
         
         {selectedTables.length > 0 && (
-          <div className="bg-blue-50 p-3 rounded-md mb-4">
+          <div className="mt-4 bg-blue-50 p-3 rounded-md">
             <div className="flex justify-between items-center">
               <div>
                 <p className="text-sm text-blue-700 font-medium">
-                  {selectedTables.length} tables selected for migration
+                  {selectedTables.length} {selectedTables.length === 1 ? 'table' : 'tables'} selected
                 </p>
                 <p className="text-xs text-blue-600 mt-1">
                   Approximately {selectedTables.reduce((acc, table) => acc + (table.rowCount || 0), 0).toLocaleString()} rows
@@ -91,7 +154,12 @@ const TableList: React.FC<TableListProps> = ({
       <div className="divide-y divide-gray-200 max-h-[500px] overflow-y-auto">
         {filteredTables.length === 0 ? (
           <div className="p-4 text-center text-gray-500">
-            No tables match your search.
+            {searchQuery 
+              ? 'No tables match your search.'
+              : showSelected 
+                ? 'No tables selected.' 
+                : 'No tables available.'
+            }
           </div>
         ) : (
           filteredTables.map(table => {
