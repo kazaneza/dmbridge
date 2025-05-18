@@ -84,7 +84,12 @@ async def fetch_mssql_schema(connection_string: str) -> List[DatabaseTable]:
     except Exception as e:
         raise Exception(f"Error fetching MSSQL schema: {str(e)}")
 
-async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
+async def search_oracle_views(
+    connection_string: str,
+    search: Optional[str] = None,
+    limit: int = 10,
+    offset: int = 0
+) -> List[DatabaseTable]:
     tables = []
     conn = None
     cursor = None
@@ -93,80 +98,113 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
         
-        # Query to get tables, views and their row counts
-        cursor.execute("""
-            SELECT 
+        # Build the search condition
+        where_clause = "WHERE object_type = 'VIEW'"
+        if search:
+            where_clause += f" AND object_name LIKE '{search.upper()}%'"
+        
+        # Get list of views with optimized query
+        cursor.execute(f"""
+            SELECT /*+ FIRST_ROWS({limit}) */
                 owner AS schema_name,
-                object_name AS table_name,
-                object_type,
-                num_rows
-            FROM all_objects ao
-            LEFT JOIN all_tables at ON ao.owner = at.owner 
-                AND ao.object_name = at.table_name
-            WHERE object_type IN ('TABLE', 'VIEW')
-            AND owner NOT IN ('SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 
-                            'DBSNMP', 'APPQOSSYS', 'WMSYS', 'EXFSYS', 'CTXSYS', 
-                            'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA', 'ORDPLUGINS', 
-                            'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA', 
-                            'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 
-                            'SYSMAN', 'MGMT_VIEW', 'APEX_030200', 'FLOWS_FILES', 
-                            'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT')
+                object_name AS table_name
+            FROM all_objects
+            {where_clause}
+            AND owner NOT IN (
+                'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
+                'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
+                'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
+                'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
+                'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
+            )
             ORDER BY owner, object_name
-        """)
+            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+        """, {'offset': offset, 'limit': limit})
         
         tables_data = cursor.fetchall()
         
         for table in tables_data:
-            schema_name, table_name, object_type, row_count = table
+            schema_name, table_name = table
             
-            # Get columns for this table/view
+            # Get columns for this view
             cursor.execute("""
                 SELECT 
                     column_name,
                     data_type,
-                    nullable,
-                    CASE WHEN position IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key
-                FROM all_tab_columns atc
-                LEFT JOIN (
-                    SELECT column_name, position
-                    FROM all_constraints ac
-                    JOIN all_cons_columns acc ON ac.owner = acc.owner 
-                        AND ac.constraint_name = acc.constraint_name
-                    WHERE ac.constraint_type = 'P'
-                    AND ac.owner = :1
-                    AND ac.table_name = :2
-                ) pk ON atc.column_name = pk.column_name
-                WHERE atc.owner = :1
-                AND atc.table_name = :2
+                    nullable
+                FROM all_tab_columns
+                WHERE owner = :1
+                AND table_name = :2
                 ORDER BY column_id
             """, [schema_name, table_name])
             
             columns = []
             for col in cursor.fetchall():
-                column_name, data_type, nullable, is_primary_key = col
+                column_name, data_type, nullable = col
                 columns.append(DatabaseColumn(
                     name=column_name,
                     type=data_type,
                     nullable=(nullable == 'Y'),
-                    isPrimaryKey=bool(is_primary_key),
+                    isPrimaryKey=False,
                     selected=True
                 ))
             
-            # Get actual row count if not available
-            if not row_count and object_type == 'VIEW':
-                try:
+            # Get the full row count for the view - FIXED SYNTAX
+            row_count = 0
+            try:
+                # Try to get the row count from all_tables/all_objects if it exists there
+                cursor.execute("""
+                    SELECT num_rows 
+                    FROM all_tables 
+                    WHERE owner = :1 
+                    AND table_name = :2
+                """, [schema_name, table_name])
+                
+                count_result = cursor.fetchone()
+                
+                # If not found in all_tables, do a full count on the view
+                if not count_result or count_result[0] is None:
+                    # We'll set a timeout to avoid hanging on very large tables
+                    cursor.execute("ALTER SESSION SET QUERY_REWRITE_ENABLED = TRUE")
+                    
+                    # Set query timeout to 30 seconds (if supported by your Oracle version)
+                    try:
+                        cursor.execute("BEGIN DBMS_SESSION.SET_STATEMENT_TIMEOUT(30000); END;")
+                    except:
+                        pass  # Skip if not supported
+                    
+                    # Try to get the full count
                     cursor.execute(f"""
-                        SELECT /*+ FIRST_ROWS(1) */ COUNT(*) 
-                        FROM {schema_name}.{table_name}
+                        SELECT COUNT(*) FROM {schema_name}.{table_name}
                     """)
-                    row_count = cursor.fetchone()[0]
-                except:
-                    row_count = 0
+                    count_result = cursor.fetchone()
+                    
+                if count_result and count_result[0] is not None:
+                    row_count = count_result[0]
+            except Exception as e:
+                # If counting fails, try a different approach with a sample
+                try:
+                    # Try a simpler count with rownum limit just to get some data
+                    cursor.execute(f"""
+                        SELECT COUNT(*) FROM (
+                            SELECT 1 FROM {schema_name}.{table_name}
+                            WHERE ROWNUM <= 1000000
+                        )
+                    """)
+                    count_result = cursor.fetchone()
+                    if count_result and count_result[0]:
+                        row_count = count_result[0]
+                        # If we hit the limit exactly, indicate it might be more
+                        if row_count == 1000000:
+                            row_count = 1000000  # Could add a + symbol in the UI if needed
+                except Exception:
+                    # If all else fails, leave as 0
+                    pass
             
             tables.append(DatabaseTable(
                 name=table_name,
                 schema=schema_name,
-                rowCount=row_count if row_count is not None else 0,
+                rowCount=row_count,  # Using the actual row count
                 columns=columns,
                 selected=False
             ))
@@ -174,13 +212,18 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
         return tables
         
     except Exception as e:
-        raise Exception(f"Error fetching Oracle schema: {str(e)}")
+        raise Exception(f"Error searching Oracle views: {str(e)}")
         
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
+
+async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
+    # For Oracle, we'll use the search endpoint instead
+    # This function now returns an empty list
+    return []
 
 async def fetch_sqlite_schema(database_path: str) -> List[DatabaseTable]:
     tables = []
