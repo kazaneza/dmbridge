@@ -116,25 +116,36 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
 
         cursor = conn.cursor()
         
-        # Get all tables and views
+        # Get all tables and views with optimized query
         cursor.execute("""
+            WITH table_counts AS (
+                SELECT owner, table_name, num_rows
+                FROM all_tables
+                WHERE owner NOT IN (
+                    'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
+                    'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
+                    'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
+                    'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
+                    'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
+                )
+            )
             SELECT 
-                owner AS schema_name,
-                object_name AS table_name,
-                object_type,
-                CASE WHEN object_type = 'TABLE' THEN 
-                    (SELECT num_rows FROM all_tables WHERE owner = ao.owner AND table_name = ao.object_name)
-                ELSE 0 END as row_count
+                ao.owner AS schema_name,
+                ao.object_name AS table_name,
+                ao.object_type,
+                NVL(tc.num_rows, 0) as row_count
             FROM all_objects ao
-            WHERE object_type IN ('TABLE', 'VIEW')
-            AND owner NOT IN (
+            LEFT JOIN table_counts tc ON ao.owner = tc.owner 
+                AND ao.object_name = tc.table_name
+            WHERE ao.object_type IN ('TABLE', 'VIEW')
+            AND ao.owner NOT IN (
                 'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
                 'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
                 'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
                 'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
                 'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
             )
-            ORDER BY owner, object_name
+            ORDER BY ao.owner, ao.object_name
         """)
         
         tables_data = cursor.fetchall()
@@ -142,42 +153,33 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
         for table in tables_data:
             schema_name, table_name, object_type, row_count = table
             
-            # Get columns for this table/view
+            # Get columns with optimized query
             cursor.execute("""
-                SELECT 
-                    column_name,
-                    data_type,
-                    nullable,
-                    CASE 
-                        WHEN constraint_type = 'P' THEN 1 
-                        ELSE 0 
-                    END as is_primary_key
-                FROM (
-                    SELECT 
-                        atc.column_name,
-                        atc.data_type,
-                        atc.nullable,
-                        acc.constraint_type,
-                        atc.column_id
-                    FROM all_tab_columns atc
-                    LEFT JOIN (
-                        SELECT acc.owner, acc.table_name, acc.column_name, ac.constraint_type
-                        FROM all_cons_columns acc
-                        JOIN all_constraints ac ON acc.owner = ac.owner 
-                            AND acc.constraint_name = ac.constraint_name
-                        WHERE ac.constraint_type = 'P'
-                    ) acc ON atc.owner = acc.owner 
-                        AND atc.table_name = acc.table_name 
-                        AND atc.column_name = acc.column_name
-                    WHERE atc.owner = :1
-                    AND atc.table_name = :2
+                WITH pk_columns AS (
+                    SELECT column_name
+                    FROM all_cons_columns acc
+                    JOIN all_constraints ac ON acc.owner = ac.owner 
+                        AND acc.constraint_name = ac.constraint_name
+                    WHERE ac.constraint_type = 'P'
+                    AND ac.owner = :1
+                    AND ac.table_name = :2
                 )
-                ORDER BY column_id
+                SELECT 
+                    atc.column_name,
+                    atc.data_type,
+                    atc.nullable,
+                    CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END as is_primary_key,
+                    atc.column_id
+                FROM all_tab_columns atc
+                LEFT JOIN pk_columns pk ON atc.column_name = pk.column_name
+                WHERE atc.owner = :1
+                AND atc.table_name = :2
+                ORDER BY atc.column_id
             """, [schema_name, table_name])
             
             columns = []
             for col in cursor.fetchall():
-                column_name, data_type, nullable, is_primary_key = col
+                column_name, data_type, nullable, is_primary_key, _ = col
                 columns.append(DatabaseColumn(
                     name=column_name,
                     type=data_type,
@@ -189,7 +191,7 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
             tables.append(DatabaseTable(
                 name=table_name,
                 schema=schema_name,
-                rowCount=row_count if row_count is not None else 0,
+                rowCount=row_count,
                 columns=columns,
                 selected=False
             ))
