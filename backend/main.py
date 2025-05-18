@@ -9,9 +9,9 @@ from database import (
     fetch_mssql_schema, 
     fetch_oracle_schema, 
     fetch_sqlite_schema,
-    extract_table_chunks,
-    import_chunk
+    search_oracle_views
 )
+from migration import extract_table_chunks, import_chunk
 
 app = FastAPI()
 
