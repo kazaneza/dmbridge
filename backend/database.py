@@ -100,13 +100,16 @@ async def search_oracle_views(
         if search:
             where_clause += f" AND ao.object_name LIKE '%{search.upper()}%'"
         
-        # Query to get views with pagination
+        # Query to get views with actual row counts
         cursor.execute(f"""
             SELECT 
                 ao.owner AS schema_name,
                 ao.object_name AS table_name,
                 ao.object_type,
-                0 as row_count
+                (
+                    SELECT COUNT(*)
+                    FROM {schema_name}.{table_name}
+                ) as row_count
             FROM all_objects ao
             {where_clause}
             AND ao.owner NOT IN (
@@ -124,6 +127,14 @@ async def search_oracle_views(
         
         for table in tables_data:
             schema_name, table_name, object_type, row_count = table
+            
+            # Get actual row count for this view
+            try:
+                cursor.execute(f"SELECT COUNT(*) FROM {schema_name}.{table_name}")
+                row_count = cursor.fetchone()[0]
+            except:
+                # If we can't get the count (e.g., no permissions), leave it as 0
+                row_count = 0
             
             # Get columns with optimized query
             cursor.execute("""
@@ -174,6 +185,7 @@ async def search_oracle_views(
         return tables
     except Exception as e:
         raise Exception(f"Error searching Oracle views: {str(e)}")
+
 
 async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
     # For Oracle, we'll use the search endpoint instead
