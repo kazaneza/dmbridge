@@ -96,9 +96,9 @@ async def search_oracle_views(
         cursor = conn.cursor()
         
         # Build the search condition
-        search_condition = "AND ao.object_name LIKE 'FBNK%'"
+        where_clause = "WHERE ao.object_type = 'VIEW' AND ao.object_name LIKE 'FBNK%'"
         if search:
-            search_condition += f" AND ao.object_name LIKE '%{search.upper()}%'"
+            where_clause += f" AND ao.object_name LIKE '%{search.upper()}%'"
         
         # Query to get views with pagination
         cursor.execute(f"""
@@ -108,8 +108,7 @@ async def search_oracle_views(
                 ao.object_type,
                 0 as row_count
             FROM all_objects ao
-            WHERE ao.object_type = 'VIEW'
-            {search_condition}
+            {where_clause}
             AND ao.owner NOT IN (
                 'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
                 'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
