@@ -4,8 +4,14 @@ from typing import List
 import sqlite3
 import cx_Oracle
 import pyodbc
-from models import Connection, DatabaseTable, SearchParams
-from database import fetch_mssql_schema, fetch_oracle_schema, fetch_sqlite_schema, search_oracle_views
+from models import Connection, DatabaseTable, SearchParams, MigrationRequest
+from database import (
+    fetch_mssql_schema, 
+    fetch_oracle_schema, 
+    fetch_sqlite_schema,
+    extract_table_chunks,
+    import_chunk
+)
 
 app = FastAPI()
 
@@ -281,6 +287,50 @@ async def test_connection(connection: Connection):
                 "is running on the database server."
             )
         raise HTTPException(status_code=400, detail=error_message)
+
+@app.post("/api/migration/start")
+async def start_migration(request: MigrationRequest):
+    # Get source and destination connections
+    conn = sqlite3.connect('connections.db')
+    c = conn.cursor()
+    
+    # Get source connection
+    c.execute('SELECT * FROM connections WHERE id = ?', (request.source_connection_id,))
+    source_row = c.fetchone()
+    if not source_row:
+        raise HTTPException(status_code=404, detail="Source connection not found")
+    source_conn = dict(zip([col[0] for col in c.description], source_row))
+    
+    # Get destination connection
+    c.execute('SELECT * FROM connections WHERE id = ?', (request.destination_connection_id,))
+    dest_row = c.fetchone()
+    if not dest_row:
+        raise HTTPException(status_code=404, detail="Destination connection not found")
+    dest_conn = dict(zip([col[0] for col in c.description], dest_row))
+    
+    conn.close()
+    
+    try:
+        # Extract chunks from source
+        source_conn_str = source_conn['connection_string'] or f"{source_conn['username']}/{source_conn['password']}@{source_conn['host']}:{source_conn['port']}/{source_conn['database']}"
+        dest_conn_str = dest_conn['connection_string'] or f"{dest_conn['username']}/{dest_conn['password']}@{dest_conn['host']}:{dest_conn['port']}/{dest_conn['database']}"
+        
+        chunks_processed = 0
+        async for chunk in extract_table_chunks(
+            source_conn_str,
+            request.table_name,
+            request.schema,
+            request.chunk_size,
+            request.selected_columns
+        ):
+            # Import chunk to destination
+            await import_chunk(dest_conn_str, chunk, create_table=(chunks_processed == 0))
+            chunks_processed += 1
+        
+        return {"message": "Migration completed successfully", "chunks_processed": chunks_processed}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

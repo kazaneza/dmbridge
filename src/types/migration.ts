@@ -22,13 +22,14 @@ export interface MigrationOptions {
   batchSize: number;
   skipErrors: boolean;
   validateBeforeMigration: boolean;
+  useCsvExtraction: boolean;
 }
 
 export type MigrationStatus = 
   | 'draft'
   | 'validating'
-  | 'pending'
-  | 'in_progress'
+  | 'extracting'
+  | 'importing'
   | 'completed'
   | 'failed'
   | 'canceled';
@@ -44,14 +45,17 @@ export interface MigrationProgress {
   totalRows: number;
   currentTableProgress: number;
   overallProgress: number;
-  estimatedTimeRemaining: number; // in seconds
+  estimatedTimeRemaining: number;
   errors: MigrationError[];
   status: MigrationStatus;
+  currentChunk: number;
+  totalChunks: number;
 }
 
 export interface MigrationError {
   table: string;
   row?: number;
+  chunk?: number;
   message: string;
   timestamp: Date;
 }
@@ -70,7 +74,7 @@ export interface MigrationSummary {
   rowCount: number;
   startTime: Date;
   endTime?: Date;
-  duration: number; // in seconds
+  duration: number;
   status: MigrationStatus;
   hasErrors: boolean;
 }
