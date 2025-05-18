@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, Check, ChevronRight, ChevronDown, Table as TableIcon, Filter } from 'lucide-react';
 import { DatabaseTable } from '../../types/database';
 import { formatDuration } from '../../utils/migrationUtils';
@@ -18,6 +18,24 @@ const TableList: React.FC<TableListProps> = ({
   const [expandedTables, setExpandedTables] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [showSelected, setShowSelected] = useState(false);
+  const [displayedTables, setDisplayedTables] = useState<DatabaseTable[]>([]);
+  
+  useEffect(() => {
+    // Filter and limit tables based on search and selection
+    const filtered = tables.filter(table => {
+      const tableIdentifier = table.schema 
+        ? `${table.schema}.${table.name}` 
+        : table.name;
+      
+      const matchesSearch = tableIdentifier.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesFilter = !showSelected || table.selected;
+      
+      return matchesSearch && matchesFilter;
+    });
+    
+    // Only show first 10 if no search query
+    setDisplayedTables(searchQuery ? filtered : filtered.slice(0, 10));
+  }, [tables, searchQuery, showSelected]);
   
   const toggleExpand = (tableName: string, schema?: string) => {
     const key = schema ? `${schema}.${tableName}` : tableName;
@@ -32,29 +50,18 @@ const TableList: React.FC<TableListProps> = ({
     return expandedTables[key] || false;
   };
   
-  const filteredTables = tables.filter(table => {
-    const tableIdentifier = table.schema 
-      ? `${table.schema}.${table.name}` 
-      : table.name;
-    
-    const matchesSearch = tableIdentifier.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = !showSelected || table.selected;
-    
-    return matchesSearch && matchesFilter;
-  });
-  
   const selectedTables = tables.filter(table => table.selected);
   const totalEstimatedTime = estimateMigrationTime(selectedTables, 1000);
   
   const handleSelectAll = (selected: boolean) => {
-    filteredTables.forEach(table => {
+    displayedTables.forEach(table => {
       onSelectTable(table.name, table.schema, selected);
     });
   };
   
   const expandAll = () => {
     const newExpandedState: Record<string, boolean> = {};
-    filteredTables.forEach(table => {
+    displayedTables.forEach(table => {
       const key = table.schema ? `${table.schema}.${table.name}` : table.name;
       newExpandedState[key] = true;
     });
@@ -112,6 +119,11 @@ const TableList: React.FC<TableListProps> = ({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 pr-4 py-2 block w-full border border-gray-300 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500"
               />
+              {!searchQuery && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                  Showing first 10 tables
+                </div>
+              )}
             </div>
             
             <div className="flex items-center space-x-4">
@@ -152,7 +164,7 @@ const TableList: React.FC<TableListProps> = ({
       </div>
       
       <div className="divide-y divide-gray-200 max-h-[500px] overflow-y-auto">
-        {filteredTables.length === 0 ? (
+        {displayedTables.length === 0 ? (
           <div className="p-4 text-center text-gray-500">
             {searchQuery 
               ? 'No tables match your search.'
@@ -162,7 +174,7 @@ const TableList: React.FC<TableListProps> = ({
             }
           </div>
         ) : (
-          filteredTables.map(table => {
+          displayedTables.map(table => {
             const tableIdentifier = table.schema 
               ? `${table.schema}.${table.name}` 
               : table.name;
