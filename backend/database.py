@@ -248,7 +248,7 @@ async def search_oracle_views(
                 'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
                 'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
             )
-            AND object_name LIKE 'FBNK_%'
+            
         """
         
         if search:
