@@ -116,28 +116,16 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
 
         cursor = conn.cursor()
         
-        # Get all tables and views with optimized query
+        # Get only FBNK views with optimized query
         cursor.execute("""
-            WITH table_counts AS (
-                SELECT owner, table_name, num_rows
-                FROM all_tables
-                WHERE owner NOT IN (
-                    'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
-                    'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
-                    'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
-                    'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
-                    'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
-                )
-            )
             SELECT 
                 ao.owner AS schema_name,
                 ao.object_name AS table_name,
                 ao.object_type,
-                NVL(tc.num_rows, 0) as row_count
+                0 as row_count
             FROM all_objects ao
-            LEFT JOIN table_counts tc ON ao.owner = tc.owner 
-                AND ao.object_name = tc.table_name
-            WHERE ao.object_type IN ('TABLE', 'VIEW')
+            WHERE ao.object_type = 'VIEW'
+            AND ao.object_name LIKE 'FBNK%'
             AND ao.owner NOT IN (
                 'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
                 'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
