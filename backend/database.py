@@ -100,59 +100,89 @@ async def search_oracle_views(
         
         # Build the search condition
         where_clause = "WHERE object_type = 'VIEW'"
-        if search:
-            where_clause += f" AND object_name LIKE '{search.upper()}%'"
+        bind_vars = {}
         
-        # Get list of views with optimized query
+        if search:
+            where_clause += " AND (object_name LIKE :search_pattern OR owner LIKE :search_pattern)"
+            bind_vars['search_pattern'] = f"%{search.upper()}%"
+        
+        # Get list of views with row count estimate
         cursor.execute(f"""
             SELECT /*+ FIRST_ROWS({limit}) */
-                owner AS schema_name,
-                object_name AS table_name
-            FROM all_objects
+                v.owner AS schema_name,
+                v.view_name AS table_name,
+                t.num_rows AS row_count
+            FROM all_views v
+            LEFT JOIN all_tables t ON v.view_name = t.table_name AND v.owner = t.owner
             {where_clause}
-            AND owner NOT IN (
+            AND v.owner NOT IN (
                 'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
                 'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
                 'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
                 'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
                 'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
             )
-            ORDER BY owner, object_name
+            ORDER BY v.owner, v.view_name
             OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
-        """, {'offset': offset, 'limit': limit})
+        """, {'offset': offset, 'limit': limit, **bind_vars})
         
         tables_data = cursor.fetchall()
         
         for table in tables_data:
-            schema_name, table_name = table
+            schema_name, table_name, row_count = table
             
             # Get columns for this view
             cursor.execute("""
                 SELECT 
                     column_name,
                     data_type,
-                    nullable
-                FROM all_tab_columns
-                WHERE owner = :1
-                AND table_name = :2
+                    nullable,
+                    CASE 
+                        WHEN position IS NOT NULL THEN 1 
+                        ELSE 0 
+                    END AS is_primary_key
+                FROM all_tab_columns atc
+                LEFT JOIN (
+                    SELECT column_name, position
+                    FROM all_constraints ac
+                    JOIN all_cons_columns acc 
+                        ON ac.owner = acc.owner 
+                        AND ac.constraint_name = acc.constraint_name
+                    WHERE ac.constraint_type = 'P'
+                    AND ac.owner = :1
+                    AND ac.table_name = :2
+                ) pk ON atc.column_name = pk.column_name
+                WHERE atc.owner = :1
+                AND atc.table_name = :2
                 ORDER BY column_id
             """, [schema_name, table_name])
             
             columns = []
             for col in cursor.fetchall():
-                column_name, data_type, nullable = col
+                column_name, data_type, nullable, is_primary_key = col
                 columns.append(DatabaseColumn(
                     name=column_name,
                     type=data_type,
                     nullable=(nullable == 'Y'),
-                    isPrimaryKey=False,
+                    isPrimaryKey=bool(is_primary_key),
                     selected=True
                 ))
+            
+            # Get actual row count if not available
+            if not row_count:
+                try:
+                    cursor.execute(f"""
+                        SELECT /*+ FIRST_ROWS(1) */ COUNT(*) 
+                        FROM {schema_name}.{table_name}
+                    """)
+                    row_count = cursor.fetchone()[0]
+                except:
+                    row_count = 0
             
             tables.append(DatabaseTable(
                 name=table_name,
                 schema=schema_name,
-                rowCount=0,  # Skip row count for performance
+                rowCount=row_count,
                 columns=columns,
                 selected=False
             ))
