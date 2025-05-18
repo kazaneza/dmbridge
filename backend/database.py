@@ -100,16 +100,12 @@ async def search_oracle_views(
         if search:
             where_clause += f" AND ao.object_name LIKE '%{search.upper()}%'"
         
-        # Query to get views with actual row counts
+        # First get the list of views
         cursor.execute(f"""
             SELECT 
                 ao.owner AS schema_name,
                 ao.object_name AS table_name,
-                ao.object_type,
-                (
-                    SELECT COUNT(*)
-                    FROM {schema_name}.{table_name}
-                ) as row_count
+                ao.object_type
             FROM all_objects ao
             {where_clause}
             AND ao.owner NOT IN (
@@ -126,19 +122,27 @@ async def search_oracle_views(
         tables_data = cursor.fetchall()
         
         for table in tables_data:
-            schema_name, table_name, object_type, row_count = table
+            schema_name, table_name, object_type = table
             
-            # Get actual row count for this view
+            # Get actual row count for this view using dynamic SQL
+            row_count = 0
             try:
-                cursor.execute(f"SELECT COUNT(*) FROM {schema_name}.{table_name}")
+                count_sql = f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'
+                cursor.execute(count_sql)
                 row_count = cursor.fetchone()[0]
-            except:
-                # If we can't get the count (e.g., no permissions), leave it as 0
+            except Exception as e:
+                print(f"Error getting row count for {schema_name}.{table_name}: {str(e)}")
                 row_count = 0
             
-            # Get columns with optimized query
+            # Get columns for this view
             cursor.execute("""
-                WITH pk_columns AS (
+                SELECT 
+                    atc.column_name,
+                    atc.data_type,
+                    atc.nullable,
+                    CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END as is_primary_key
+                FROM all_tab_columns atc
+                LEFT JOIN (
                     SELECT column_name
                     FROM all_cons_columns acc
                     JOIN all_constraints ac ON acc.owner = ac.owner 
@@ -146,15 +150,7 @@ async def search_oracle_views(
                     WHERE ac.constraint_type = 'P'
                     AND ac.owner = :1
                     AND ac.table_name = :2
-                )
-                SELECT 
-                    atc.column_name,
-                    atc.data_type,
-                    atc.nullable,
-                    CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END as is_primary_key,
-                    atc.column_id
-                FROM all_tab_columns atc
-                LEFT JOIN pk_columns pk ON atc.column_name = pk.column_name
+                ) pk ON atc.column_name = pk.column_name
                 WHERE atc.owner = :1
                 AND atc.table_name = :2
                 ORDER BY atc.column_id
@@ -162,7 +158,7 @@ async def search_oracle_views(
             
             columns = []
             for col in cursor.fetchall():
-                column_name, data_type, nullable, is_primary_key, _ = col
+                column_name, data_type, nullable, is_primary_key = col
                 columns.append(DatabaseColumn(
                     name=column_name,
                     type=data_type,
@@ -185,7 +181,6 @@ async def search_oracle_views(
         return tables
     except Exception as e:
         raise Exception(f"Error searching Oracle views: {str(e)}")
-
 
 async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
     # For Oracle, we'll use the search endpoint instead
