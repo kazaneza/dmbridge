@@ -21,19 +21,21 @@ const TableList: React.FC<TableListProps> = ({
   const [displayedTables, setDisplayedTables] = useState<DatabaseTable[]>([]);
   
   useEffect(() => {
-    // Filter and limit tables based on search and selection
+    // Filter tables based on search and selection
     const filtered = tables.filter(table => {
       const tableIdentifier = table.schema 
         ? `${table.schema}.${table.name}` 
         : table.name;
       
-      const matchesSearch = tableIdentifier.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesSearch = searchQuery
+        ? tableIdentifier.toLowerCase().includes(searchQuery.toLowerCase())
+        : true;
       const matchesFilter = !showSelected || table.selected;
       
       return matchesSearch && matchesFilter;
     });
     
-    // Only show first 10 if no search query
+    // Only limit to first 10 if there's no search query
     setDisplayedTables(searchQuery ? filtered : filtered.slice(0, 10));
   }, [tables, searchQuery, showSelected]);
   
@@ -119,9 +121,9 @@ const TableList: React.FC<TableListProps> = ({
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-10 pr-4 py-2 block w-full border border-gray-300 rounded-md text-sm focus:ring-teal-500 focus:border-teal-500"
               />
-              {!searchQuery && (
+              {!searchQuery && tables.length > 10 && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
-                  Showing first 10 tables
+                  Showing first 10 of {tables.length} tables
                 </div>
               )}
             </div>

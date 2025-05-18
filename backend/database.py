@@ -12,7 +12,7 @@ async def fetch_mssql_schema(connection_string: str) -> List[DatabaseTable]:
         
         # Query to get tables, views and their row counts
         cursor.execute("""
-            SELECT TOP 10
+            SELECT 
                 s.name AS schema_name,
                 t.name AS table_name,
                 t.type_desc AS object_type,
@@ -23,7 +23,7 @@ async def fetch_mssql_schema(connection_string: str) -> List[DatabaseTable]:
             INNER JOIN sys.partitions p ON i.object_id = p.object_id AND i.index_id = p.index_id
             WHERE i.index_id <= 1
             UNION ALL
-            SELECT TOP 10
+            SELECT 
                 s.name AS schema_name,
                 v.name AS table_name,
                 v.type_desc AS object_type,
@@ -116,27 +116,25 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
 
         cursor = conn.cursor()
         
-        # First get all tables and views (limited to 10)
+        # Get all tables and views
         cursor.execute("""
-            SELECT * FROM (
-                SELECT 
-                    owner AS schema_name,
-                    object_name AS table_name,
-                    object_type,
-                    CASE WHEN object_type = 'TABLE' THEN 
-                        (SELECT num_rows FROM all_tables WHERE owner = ao.owner AND table_name = ao.object_name)
-                    ELSE 0 END as row_count
-                FROM all_objects ao
-                WHERE object_type IN ('TABLE', 'VIEW')
-                AND owner NOT IN (
-                    'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
-                    'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
-                    'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
-                    'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
-                    'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
-                )
-                ORDER BY owner, object_name
-            ) WHERE ROWNUM <= 10
+            SELECT 
+                owner AS schema_name,
+                object_name AS table_name,
+                object_type,
+                CASE WHEN object_type = 'TABLE' THEN 
+                    (SELECT num_rows FROM all_tables WHERE owner = ao.owner AND table_name = ao.object_name)
+                ELSE 0 END as row_count
+            FROM all_objects ao
+            WHERE object_type IN ('TABLE', 'VIEW')
+            AND owner NOT IN (
+                'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
+                'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
+                'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
+                'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
+                'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
+            )
+            ORDER BY owner, object_name
         """)
         
         tables_data = cursor.fetchall()
@@ -209,14 +207,13 @@ async def fetch_sqlite_schema(database_path: str) -> List[DatabaseTable]:
         conn = sqlite3.connect(database_path)
         cursor = conn.cursor()
         
-        # Get all tables and views (limited to 10)
+        # Get all tables and views
         cursor.execute("""
             SELECT name, type 
             FROM sqlite_master 
             WHERE type IN ('table', 'view')
             AND name NOT LIKE 'sqlite_%'
             ORDER BY name
-            LIMIT 10
         """)
         
         for table_name, table_type in cursor.fetchall():
