@@ -234,13 +234,25 @@ async def search_oracle_views(
     offset: int = 0
 ) -> List[DatabaseTable]:
     tables = []
+    conn = None
+    cursor = None
+    
     try:
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
         
         # Build the search condition
-        where_clause = """
-            WHERE object_type = 'VIEW'
+        where_clause = "WHERE object_type = 'VIEW' AND object_name LIKE 'FBNK_%'"
+        if search:
+            where_clause += f" AND object_name LIKE 'FBNK_{search.upper()}%'"
+        
+        # Get list of views with optimized query
+        cursor.execute(f"""
+            SELECT /*+ FIRST_ROWS({limit}) */
+                owner AS schema_name,
+                object_name AS table_name
+            FROM all_objects
+            {where_clause}
             AND owner NOT IN (
                 'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
                 'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
@@ -248,20 +260,6 @@ async def search_oracle_views(
                 'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
                 'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
             )
-            
-        """
-        
-        if search:
-            where_clause += f" AND object_name LIKE 'FBNK_{search.upper()}%'"
-        
-        # Get list of views with optimized query
-        cursor.execute(f"""
-            SELECT /*+ FIRST_ROWS(10) */
-                owner AS schema_name,
-                object_name AS table_name,
-                object_type
-            FROM all_objects
-            {where_clause}
             ORDER BY owner, object_name
             OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
         """, {'offset': offset, 'limit': limit})
@@ -269,28 +267,14 @@ async def search_oracle_views(
         tables_data = cursor.fetchall()
         
         for table in tables_data:
-            schema_name, table_name, object_type = table
+            schema_name, table_name = table
             
-            # Get approximate row count with timeout
-            try:
-                cursor.execute("""
-                    SELECT /*+ FIRST_ROWS(1) */ COUNT(*)
-                    FROM (
-                        SELECT 1 FROM "%s"."%s"
-                        WHERE ROWNUM <= 1000
-                    )
-                """ % (schema_name, table_name))
-                row_count = cursor.fetchone()[0]
-            except:
-                row_count = 0
-            
-            # Get columns with optimized query
+            # Get columns for this view
             cursor.execute("""
                 SELECT 
                     column_name,
                     data_type,
-                    nullable,
-                    0 as is_primary_key
+                    nullable
                 FROM all_tab_columns
                 WHERE owner = :1
                 AND table_name = :2
@@ -299,33 +283,33 @@ async def search_oracle_views(
             
             columns = []
             for col in cursor.fetchall():
-                column_name, data_type, nullable, is_primary_key = col
+                column_name, data_type, nullable = col
                 columns.append(DatabaseColumn(
                     name=column_name,
                     type=data_type,
                     nullable=(nullable == 'Y'),
-                    isPrimaryKey=bool(is_primary_key),
+                    isPrimaryKey=False,
                     selected=True
                 ))
             
             tables.append(DatabaseTable(
                 name=table_name,
                 schema=schema_name,
-                rowCount=row_count,
+                rowCount=0,  # Skip row count for performance
                 columns=columns,
                 selected=False
             ))
         
-        cursor.close()
-        conn.close()
-        
         return tables
+        
     except Exception as e:
+        raise Exception(f"Error searching Oracle views: {str(e)}")
+        
+    finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
-        raise Exception(f"Error searching Oracle views: {str(e)}")
 
 async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
     # For Oracle, we'll use the search endpoint instead
