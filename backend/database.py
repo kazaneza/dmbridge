@@ -96,7 +96,7 @@ async def search_oracle_views(
         cursor = conn.cursor()
         
         # Build the search condition
-        where_clause = "WHERE ao.object_type = 'VIEW' AND ao.object_name LIKE 'FBNK%'"
+        where_clause = "WHERE ao.object_type = 'VIEW'"
         if search:
             where_clause += f" AND ao.object_name LIKE '%{search.upper()}%'"
         
