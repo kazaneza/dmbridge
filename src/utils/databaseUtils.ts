@@ -81,11 +81,50 @@ export const disconnectFromDatabase = async (
   };
 };
 
+// Function to search Oracle views
+export const searchOracleViews = async (
+  connectionId: string,
+  searchQuery: string,
+  limit: number = 10,
+  offset: number = 0
+): Promise<DatabaseTable[]> => {
+  try {
+    const response = await fetch(`http://localhost:8000/api/connections/${connectionId}/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        search: searchQuery,
+        limit,
+        offset
+      })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to search views');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Failed to search views');
+  }
+};
+
 // Function to retrieve schema information from the backend
 export const fetchDatabaseSchema = async (
   connection: DatabaseConnection
 ): Promise<DatabaseSchema> => {
   try {
+    if (connection.type === 'oracle') {
+      // For Oracle, start with an empty schema
+      return {
+        tables: [],
+        loading: false
+      };
+    }
+    
     const response = await fetch(`http://localhost:8000/api/connections/${connection.id}/schema`);
     
     if (!response.ok) {
