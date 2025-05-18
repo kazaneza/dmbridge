@@ -116,24 +116,24 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
 
         cursor = conn.cursor()
         
-        # Query to get tables, views and their row counts
+        # First get all tables and views
         cursor.execute("""
             SELECT 
                 owner AS schema_name,
                 object_name AS table_name,
                 object_type,
-                num_rows
+                CASE WHEN object_type = 'TABLE' THEN 
+                    (SELECT num_rows FROM all_tables WHERE owner = ao.owner AND table_name = ao.object_name)
+                ELSE 0 END as row_count
             FROM all_objects ao
-            LEFT JOIN all_tables at ON ao.owner = at.owner 
-                AND ao.object_name = at.table_name
             WHERE object_type IN ('TABLE', 'VIEW')
-            AND owner NOT IN ('SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 
-                            'DBSNMP', 'APPQOSSYS', 'WMSYS', 'EXFSYS', 'CTXSYS', 
-                            'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA', 'ORDPLUGINS', 
-                            'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA', 
-                            'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 
-                            'SYSMAN', 'MGMT_VIEW', 'APEX_030200', 'FLOWS_FILES', 
-                            'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT')
+            AND owner NOT IN (
+                'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
+                'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
+                'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
+                'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
+                'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
+            )
             ORDER BY owner, object_name
         """)
         
@@ -148,19 +148,30 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
                     column_name,
                     data_type,
                     nullable,
-                    CASE WHEN position IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key
-                FROM all_tab_columns atc
-                LEFT JOIN (
-                    SELECT column_name, position
-                    FROM all_constraints ac
-                    JOIN all_cons_columns acc ON ac.owner = acc.owner 
-                        AND ac.constraint_name = acc.constraint_name
-                    WHERE ac.constraint_type = 'P'
-                    AND ac.owner = :1
-                    AND ac.table_name = :2
-                ) pk ON atc.column_name = pk.column_name
-                WHERE atc.owner = :1
-                AND atc.table_name = :2
+                    CASE 
+                        WHEN constraint_type = 'P' THEN 1 
+                        ELSE 0 
+                    END as is_primary_key
+                FROM (
+                    SELECT 
+                        atc.column_name,
+                        atc.data_type,
+                        atc.nullable,
+                        acc.constraint_type,
+                        atc.column_id
+                    FROM all_tab_columns atc
+                    LEFT JOIN (
+                        SELECT acc.owner, acc.table_name, acc.column_name, ac.constraint_type
+                        FROM all_cons_columns acc
+                        JOIN all_constraints ac ON acc.owner = ac.owner 
+                            AND acc.constraint_name = ac.constraint_name
+                        WHERE ac.constraint_type = 'P'
+                    ) acc ON atc.owner = acc.owner 
+                        AND atc.table_name = acc.table_name 
+                        AND atc.column_name = acc.column_name
+                    WHERE atc.owner = :1
+                    AND atc.table_name = :2
+                )
                 ORDER BY column_id
             """, [schema_name, table_name])
             
