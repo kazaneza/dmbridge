@@ -31,22 +31,22 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({
     }
   }, [progress.overallProgress]);
   
-  const isInProgress = progress.status === 'in_progress' || progress.status === 'validating';
+  const isInProgress = progress.status === 'importing' || progress.status === 'extracting';
   const isCompleted = progress.status === 'completed';
   const isFailed = progress.status === 'failed';
   
   const renderStatusBadge = () => {
     switch (progress.status) {
-      case 'validating':
+      case 'extracting':
         return (
           <span className="px-2 py-1 text-xs font-medium rounded-md bg-blue-100 text-blue-800">
-            Validating
+            Processing Data
           </span>
         );
-      case 'in_progress':
+      case 'importing':
         return (
           <span className="px-2 py-1 text-xs font-medium rounded-md bg-teal-100 text-teal-800">
-            In Progress
+            Migrating Data
           </span>
         );
       case 'completed':
@@ -78,8 +78,8 @@ const ProgressTracker: React.FC<ProgressTrackerProps> = ({
   
   const renderIcon = () => {
     switch (progress.status) {
-      case 'validating':
-      case 'in_progress':
+      case 'extracting':
+      case 'importing':
         return <Play className="h-5 w-5 text-teal-500" />;
       case 'completed':
         return <CheckCircle className="h-5 w-5 text-green-500" />;
