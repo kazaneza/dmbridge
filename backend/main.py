@@ -4,8 +4,8 @@ from typing import List
 import sqlite3
 import cx_Oracle
 import pyodbc
-from models import Connection, DatabaseTable
-from database import fetch_mssql_schema, fetch_oracle_schema, fetch_sqlite_schema
+from models import Connection, DatabaseTable, SearchParams
+from database import fetch_mssql_schema, fetch_oracle_schema, fetch_sqlite_schema, search_oracle_views
 
 app = FastAPI()
 
@@ -118,15 +118,48 @@ async def get_schema(connection_id: str) -> List[DatabaseTable]:
         elif connection['type'] == 'oracle':
             conn_str = connection['connection_string']
             if not conn_str:
-                # Build the connection string with service name
                 conn_str = f"{connection['username']}/{connection['password']}@{connection['host']}:{connection['port']}/{connection['database']}"
-            return await fetch_oracle_schema(conn_str)
+            # For Oracle, return empty list as we'll use search endpoint
+            return []
             
         elif connection['type'] == 'sqlite':
             return await fetch_sqlite_schema(connection['database'])
             
         else:
             raise HTTPException(status_code=400, detail="Unsupported database type")
+            
+    except Exception as e:
+        error_message = str(e)
+        if "ORA-12514" in error_message:
+            error_message = (
+                "Cannot connect to database. The specified service name is not registered "
+                "with the listener. Please verify the service name and ensure the listener "
+                "is running on the database server."
+            )
+        raise HTTPException(status_code=500, detail=error_message)
+
+@app.post("/api/connections/{connection_id}/search")
+async def search_schema(connection_id: str, params: SearchParams) -> List[DatabaseTable]:
+    # Get connection details
+    conn = sqlite3.connect('connections.db')
+    c = conn.cursor()
+    c.execute('SELECT * FROM connections WHERE id = ?', (connection_id,))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    
+    connection = dict(zip([col[0] for col in c.description], row))
+    
+    try:
+        if connection['type'] == 'oracle':
+            conn_str = connection['connection_string']
+            if not conn_str:
+                conn_str = f"{connection['username']}/{connection['password']}@{connection['host']}:{connection['port']}/{connection['database']}"
+            return await search_oracle_views(conn_str, params.search, params.limit, params.offset)
+        else:
+            raise HTTPException(status_code=400, detail="Search is only supported for Oracle connections")
             
     except Exception as e:
         error_message = str(e)

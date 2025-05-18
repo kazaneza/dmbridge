@@ -84,40 +84,24 @@ async def fetch_mssql_schema(connection_string: str) -> List[DatabaseTable]:
     except Exception as e:
         raise Exception(f"Error fetching MSSQL schema: {str(e)}")
 
-async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
+async def search_oracle_views(
+    connection_string: str,
+    search: Optional[str] = None,
+    limit: int = 10,
+    offset: int = 0
+) -> List[DatabaseTable]:
     tables = []
     try:
-        # Try to connect with the full connection descriptor if simple connection fails
-        try:
-            conn = cx_Oracle.connect(connection_string)
-        except cx_Oracle.DatabaseError as e:
-            error_obj, = e.args
-            if error_obj.code == 12514:  # TNS:listener does not currently know of service requested
-                # Parse the connection string to build the full descriptor
-                if '/' in connection_string and '@' in connection_string:
-                    creds, connect_data = connection_string.split('@')
-                    if ':' in connect_data:
-                        host, rest = connect_data.split(':')
-                        if '/' in rest:
-                            port, service = rest.split('/')
-                            full_desc = (
-                                f"{creds}@(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT={port}))"
-                                f"(CONNECT_DATA=(SERVICE_NAME={service})))"
-                            )
-                            conn = cx_Oracle.connect(full_desc)
-                        else:
-                            raise
-                    else:
-                        raise
-                else:
-                    raise
-            else:
-                raise
-
+        conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
         
-        # Get only FBNK views with optimized query
-        cursor.execute("""
+        # Build the search condition
+        search_condition = "AND ao.object_name LIKE 'FBNK%'"
+        if search:
+            search_condition += f" AND ao.object_name LIKE '%{search.upper()}%'"
+        
+        # Query to get views with pagination
+        cursor.execute(f"""
             SELECT 
                 ao.owner AS schema_name,
                 ao.object_name AS table_name,
@@ -125,7 +109,7 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
                 0 as row_count
             FROM all_objects ao
             WHERE ao.object_type = 'VIEW'
-            AND ao.object_name LIKE 'FBNK%'
+            {search_condition}
             AND ao.owner NOT IN (
                 'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
                 'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
@@ -134,7 +118,8 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
                 'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
             )
             ORDER BY ao.owner, ao.object_name
-        """)
+            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+        """, {'offset': offset, 'limit': limit})
         
         tables_data = cursor.fetchall()
         
@@ -189,7 +174,12 @@ async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
         
         return tables
     except Exception as e:
-        raise Exception(f"Error fetching Oracle schema: {str(e)}")
+        raise Exception(f"Error searching Oracle views: {str(e)}")
+
+async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
+    # For Oracle, we'll use the search endpoint instead
+    # This function now returns an empty list
+    return []
 
 async def fetch_sqlite_schema(database_path: str) -> List[DatabaseTable]:
     tables = []

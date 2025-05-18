@@ -25,3 +25,8 @@ class Connection(BaseModel):
     password: Optional[str] = None
     database: Optional[str] = None
     connection_string: Optional[str] = None
+
+class SearchParams(BaseModel):
+    search: Optional[str] = None
+    limit: Optional[int] = 10
+    offset: Optional[int] = 0
