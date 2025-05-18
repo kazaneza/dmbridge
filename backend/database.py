@@ -1,5 +1,5 @@
 import sqlite3
-from typing import List, Optional, Generator
+from typing import List, Optional, Generator, AsyncGenerator
 import pyodbc
 import cx_Oracle
 import csv
@@ -238,19 +238,9 @@ async def search_oracle_views(
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
         
-        # Build the search condition
-        where_clause = "WHERE ao.object_type = 'VIEW'"
-        if search:
-            where_clause += f" AND ao.object_name LIKE '%{search.upper()}%'"
-        
-        # First get the list of views
-        cursor.execute(f"""
-            SELECT 
-                ao.owner AS schema_name,
-                ao.object_name AS table_name,
-                ao.object_type
-            FROM all_objects ao
-            {where_clause}
+        # Build the search condition with proper indexing hints
+        where_clause = """
+            WHERE ao.object_type = 'VIEW'
             AND ao.owner NOT IN (
                 'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
                 'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
@@ -258,6 +248,23 @@ async def search_oracle_views(
                 'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
                 'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
             )
+        """
+        
+        if search:
+            # Add FBNK_ prefix if not already present
+            search_term = search if search.upper().startswith('FBNK_') else f'FBNK_{search}'
+            where_clause += f" AND ao.object_name LIKE '{search_term.upper()}%'"
+        else:
+            where_clause += " AND ao.object_name LIKE 'FBNK_%'"
+        
+        # First get the list of views with optimized query
+        cursor.execute(f"""
+            SELECT /*+ INDEX(ao) */ 
+                ao.owner AS schema_name,
+                ao.object_name AS table_name,
+                ao.object_type
+            FROM all_objects ao
+            {where_clause}
             ORDER BY ao.owner, ao.object_name
             OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
         """, {'offset': offset, 'limit': limit})
@@ -267,26 +274,35 @@ async def search_oracle_views(
         for table in tables_data:
             schema_name, table_name, object_type = table
             
-            # Get actual row count for this view using dynamic SQL
+            # Get sample row count (limit to quick execution)
             row_count = 0
             try:
-                count_sql = f'SELECT COUNT(*) FROM "{schema_name}"."{table_name}"'
+                count_sql = f"""
+                    SELECT /*+ FIRST_ROWS(1) */ COUNT(*) 
+                    FROM (
+                        SELECT 1 
+                        FROM "{schema_name}"."{table_name}" 
+                        WHERE ROWNUM <= 10000
+                    )
+                """
                 cursor.execute(count_sql)
                 row_count = cursor.fetchone()[0]
+                if row_count == 10000:
+                    row_count = -1  # Indicates "10000+"
             except Exception as e:
                 print(f"Error getting row count for {schema_name}.{table_name}: {str(e)}")
                 row_count = 0
             
-            # Get columns for this view
+            # Get columns with optimized query
             cursor.execute("""
-                SELECT 
+                SELECT /*+ INDEX(atc) */ 
                     atc.column_name,
                     atc.data_type,
                     atc.nullable,
                     CASE WHEN pk.column_name IS NOT NULL THEN 1 ELSE 0 END as is_primary_key
                 FROM all_tab_columns atc
                 LEFT JOIN (
-                    SELECT column_name
+                    SELECT acc.column_name
                     FROM all_cons_columns acc
                     JOIN all_constraints ac ON acc.owner = ac.owner 
                         AND acc.constraint_name = ac.constraint_name
@@ -322,6 +338,16 @@ async def search_oracle_views(
         conn.close()
         
         return tables
+    except cx_Oracle.DatabaseError as e:
+        error_obj, = e.args
+        if error_obj.code == 12170:  # TNS:Connect timeout occurred
+            raise Exception("Database connection timed out. Please try again.")
+        elif error_obj.code == 12541:  # TNS:no listener
+            raise Exception("Unable to connect to database. Please check if the database is running.")
+        elif error_obj.code == 1017:  # Invalid username/password
+            raise Exception("Invalid database credentials.")
+        else:
+            raise Exception(f"Database error: {str(e)}")
     except Exception as e:
         raise Exception(f"Error searching Oracle views: {str(e)}")
 
