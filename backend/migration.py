@@ -1,148 +1,205 @@
 import csv
 import os
 from tempfile import mkdtemp
-from typing import AsyncGenerator, List, Optional
+from typing import AsyncGenerator, List, Optional, Dict, Any
 import sqlite3
 import pyodbc
 import cx_Oracle
 from models import MigrationChunk
 
 TEMP_DIR = mkdtemp()
-
-def get_chunk_filename(table_name: str, chunk_number: int) -> str:
-    return os.path.join(TEMP_DIR, f"{table_name}_chunk_{chunk_number}.csv")
+CHUNK_SIZE = 100000  # Process 100k rows at a time
 
 async def extract_table_chunks(
     connection_string: str,
     table_name: str,
     schema: Optional[str] = None,
-    chunk_size: int = 1000000,
+    chunk_size: int = CHUNK_SIZE,
     selected_columns: List[str] = None
-) -> AsyncGenerator[MigrationChunk, None]:
+) -> AsyncGenerator[Dict[str, Any], None]:
+    conn = None
+    cursor = None
+    
     try:
-        conn = None
-        cursor = None
-        
+        # Connect to appropriate database
         if '.db' in connection_string:  # SQLite
             conn = sqlite3.connect(connection_string)
-            cursor = conn.cursor()
         else:  # Oracle or MSSQL
             if 'ODBC Driver' in connection_string:
                 conn = pyodbc.connect(connection_string)
             else:
                 conn = cx_Oracle.connect(connection_string)
-            cursor = conn.cursor()
         
-        # Get total row count
-        count_query = f"""
-            SELECT COUNT(*) FROM {f'"{schema}".' if schema else ''}{table_name}
-        """
-        cursor.execute(count_query)
-        total_rows = cursor.fetchone()[0]
+        cursor = conn.cursor()
         
-        # Calculate number of chunks
+        # Get column information
+        columns = selected_columns if selected_columns else get_table_columns(cursor, table_name, schema)
+        
+        # Calculate total rows and chunks
+        total_rows = get_row_count(cursor, table_name, schema)
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
-        # Generate chunks
-        for chunk_number in range(total_chunks):
-            offset = chunk_number * chunk_size
-            
-            # Build query with selected columns
-            columns = '*' if not selected_columns else ', '.join(selected_columns)
-            query = f"""
-                SELECT {columns} 
-                FROM {f'"{schema}".' if schema else ''}{table_name}
-                OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
-            """
-            
-            cursor.execute(query)
-            columns = [column[0] for column in cursor.description]
-            rows = []
-            
-            # Fetch rows and convert to dictionaries
-            for row in cursor:
-                row_dict = dict(zip(columns, row))
-                rows.append(row_dict)
-            
-            # Create chunk file
-            chunk_file = get_chunk_filename(table_name, chunk_number)
-            with open(chunk_file, 'w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=columns)
-                writer.writeheader()
-                writer.writerows(rows)
-            
-            yield MigrationChunk(
-                table_name=table_name,
-                schema=schema,
-                chunk_number=chunk_number,
-                total_chunks=total_chunks,
-                rows=rows
+        # Extract data in chunks
+        for chunk_num in range(total_chunks):
+            offset = chunk_num * chunk_size
+            chunk_data = extract_chunk(
+                cursor, 
+                table_name, 
+                schema, 
+                columns, 
+                offset, 
+                chunk_size
             )
-        
-        cursor.close()
-        conn.close()
-        
+            
+            # Save chunk to temporary CSV file
+            chunk_file = os.path.join(TEMP_DIR, f"{table_name}_{chunk_num}.csv")
+            save_chunk_to_csv(chunk_file, columns, chunk_data)
+            
+            yield {
+                'file': chunk_file,
+                'chunk_number': chunk_num,
+                'total_chunks': total_chunks,
+                'columns': columns
+            }
+            
     except Exception as e:
+        raise Exception(f"Error extracting data: {str(e)}")
+        
+    finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
-        raise Exception(f"Error extracting chunks: {str(e)}")
 
 async def import_chunk(
     connection_string: str,
-    chunk: MigrationChunk,
-    create_table: bool = True
-) -> None:
+    chunk_info: Dict[str, Any],
+    table_name: str,
+    create_table: bool = False
+) -> int:
+    conn = None
+    cursor = None
+    rows_imported = 0
+    
     try:
-        conn = None
-        cursor = None
-        
-        if '.db' in connection_string:  # SQLite
+        # Connect to destination database
+        if '.db' in connection_string:
             conn = sqlite3.connect(connection_string)
-            cursor = conn.cursor()
-        else:  # Oracle or MSSQL
+        else:
             if 'ODBC Driver' in connection_string:
                 conn = pyodbc.connect(connection_string)
             else:
                 conn = cx_Oracle.connect(connection_string)
-            cursor = conn.cursor()
         
-        if create_table and chunk.chunk_number == 0:
-            # Create table based on first chunk
-            columns = list(chunk.rows[0].keys())
-            create_query = f"""
-                CREATE TABLE IF NOT EXISTS {chunk.table_name} (
-                    {', '.join(f'{col} TEXT' for col in columns)}
-                )
-            """
-            cursor.execute(create_query)
+        cursor = conn.cursor()
         
-        # Import rows
-        chunk_file = get_chunk_filename(chunk.table_name, chunk.chunk_number)
-        with open(chunk_file, 'r', newline='') as f:
+        # Create table if needed
+        if create_table:
+            create_table_query = generate_create_table_query(
+                table_name, 
+                chunk_info['columns']
+            )
+            cursor.execute(create_table_query)
+        
+        # Import data from CSV
+        with open(chunk_info['file'], 'r') as f:
             reader = csv.DictReader(f)
+            batch = []
+            
             for row in reader:
-                placeholders = ', '.join(['?' for _ in row])
-                columns = ', '.join(row.keys())
-                values = list(row.values())
+                batch.append(list(row.values()))
+                rows_imported += 1
                 
-                insert_query = f"""
-                    INSERT INTO {chunk.table_name} ({columns})
-                    VALUES ({placeholders})
-                """
-                cursor.execute(insert_query, values)
+                # Execute in batches of 1000
+                if len(batch) >= 1000:
+                    import_batch(cursor, table_name, chunk_info['columns'], batch)
+                    batch = []
+            
+            # Import remaining rows
+            if batch:
+                import_batch(cursor, table_name, chunk_info['columns'], batch)
         
         conn.commit()
-        cursor.close()
-        conn.close()
         
-        # Clean up chunk file
-        os.remove(chunk_file)
+        # Clean up temporary file
+        os.remove(chunk_info['file'])
+        
+        return rows_imported
         
     except Exception as e:
+        if conn:
+            conn.rollback()
+        raise Exception(f"Error importing data: {str(e)}")
+        
+    finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
-        raise Exception(f"Error importing chunk: {str(e)}")
+
+def get_table_columns(cursor, table_name: str, schema: Optional[str] = None) -> List[str]:
+    """Get column names for the table"""
+    if isinstance(cursor, sqlite3.Cursor):
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        return [row[1] for row in cursor.fetchall()]
+    else:
+        table_identifier = f"{schema}.{table_name}" if schema else table_name
+        cursor.execute(f"SELECT * FROM {table_identifier} WHERE 1=0")
+        return [desc[0] for desc in cursor.description]
+
+def get_row_count(cursor, table_name: str, schema: Optional[str] = None) -> int:
+    """Get total number of rows in the table"""
+    table_identifier = f"{schema}.{table_name}" if schema else table_name
+    cursor.execute(f"SELECT COUNT(*) FROM {table_identifier}")
+    return cursor.fetchone()[0]
+
+def extract_chunk(
+    cursor,
+    table_name: str,
+    schema: Optional[str],
+    columns: List[str],
+    offset: int,
+    chunk_size: int
+) -> List[Dict[str, Any]]:
+    """Extract a chunk of data from the table"""
+    table_identifier = f"{schema}.{table_name}" if schema else table_name
+    columns_str = ', '.join(columns)
+    
+    if isinstance(cursor, sqlite3.Cursor):
+        query = f"""
+            SELECT {columns_str} FROM {table_identifier}
+            LIMIT {chunk_size} OFFSET {offset}
+        """
+    else:
+        query = f"""
+            SELECT {columns_str} FROM {table_identifier}
+            OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
+        """
+    
+    cursor.execute(query)
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, Any]]) -> None:
+    """Save chunk data to a CSV file"""
+    with open(filename, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=columns)
+        writer.writeheader()
+        writer.writerows(data)
+
+def generate_create_table_query(table_name: str, columns: List[str]) -> str:
+    """Generate CREATE TABLE query"""
+    column_defs = [f"{col} TEXT" for col in columns]
+    return f"""
+        CREATE TABLE IF NOT EXISTS {table_name} (
+            {', '.join(column_defs)}
+        )
+    """
+
+def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[Any]]) -> None:
+    """Import a batch of rows"""
+    placeholders = ','.join(['?' for _ in columns])
+    query = f"""
+        INSERT INTO {table_name} ({','.join(columns)})
+        VALUES ({placeholders})
+    """
+    cursor.executemany(query, batch)
