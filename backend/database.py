@@ -84,12 +84,7 @@ async def fetch_mssql_schema(connection_string: str) -> List[DatabaseTable]:
     except Exception as e:
         raise Exception(f"Error fetching MSSQL schema: {str(e)}")
 
-async def search_oracle_views(
-    connection_string: str,
-    search: Optional[str] = None,
-    limit: int = 10,
-    offset: int = 0
-) -> List[DatabaseTable]:
+async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
     tables = []
     conn = None
     cursor = None
@@ -98,55 +93,44 @@ async def search_oracle_views(
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
         
-        # Build the search condition
-        where_clause = "WHERE object_type = 'VIEW'"
-        bind_vars = {}
-        
-        if search:
-            where_clause += " AND (object_name LIKE :search_pattern OR owner LIKE :search_pattern)"
-            bind_vars['search_pattern'] = f"%{search.upper()}%"
-        
-        # Get list of views with row count estimate
-        cursor.execute(f"""
-            SELECT /*+ FIRST_ROWS({limit}) */
-                v.owner AS schema_name,
-                v.view_name AS table_name,
-                t.num_rows AS row_count
-            FROM all_views v
-            LEFT JOIN all_tables t ON v.view_name = t.table_name AND v.owner = t.owner
-            {where_clause}
-            AND v.owner NOT IN (
-                'SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 'DBSNMP', 'APPQOSSYS',
-                'WMSYS', 'EXFSYS', 'CTXSYS', 'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA',
-                'ORDPLUGINS', 'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA',
-                'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 'SYSMAN', 'MGMT_VIEW',
-                'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
-            )
-            ORDER BY v.owner, v.view_name
-            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
-        """, {'offset': offset, 'limit': limit, **bind_vars})
+        # Query to get tables, views and their row counts
+        cursor.execute("""
+            SELECT 
+                owner AS schema_name,
+                object_name AS table_name,
+                object_type,
+                num_rows
+            FROM all_objects ao
+            LEFT JOIN all_tables at ON ao.owner = at.owner 
+                AND ao.object_name = at.table_name
+            WHERE object_type IN ('TABLE', 'VIEW')
+            AND owner NOT IN ('SYS', 'SYSTEM', 'OUTLN', 'DIP', 'ORACLE_OCM', 
+                            'DBSNMP', 'APPQOSSYS', 'WMSYS', 'EXFSYS', 'CTXSYS', 
+                            'XDB', 'ANONYMOUS', 'ORDSYS', 'ORDDATA', 'ORDPLUGINS', 
+                            'SI_INFORMTN_SCHEMA', 'MDSYS', 'OLAPSYS', 'MDDATA', 
+                            'SPATIAL_WFS_ADMIN_USR', 'SPATIAL_CSW_ADMIN_USR', 
+                            'SYSMAN', 'MGMT_VIEW', 'APEX_030200', 'FLOWS_FILES', 
+                            'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT')
+            ORDER BY owner, object_name
+        """)
         
         tables_data = cursor.fetchall()
         
         for table in tables_data:
-            schema_name, table_name, row_count = table
+            schema_name, table_name, object_type, row_count = table
             
-            # Get columns for this view
+            # Get columns for this table/view
             cursor.execute("""
                 SELECT 
                     column_name,
                     data_type,
                     nullable,
-                    CASE 
-                        WHEN position IS NOT NULL THEN 1 
-                        ELSE 0 
-                    END AS is_primary_key
+                    CASE WHEN position IS NOT NULL THEN 1 ELSE 0 END AS is_primary_key
                 FROM all_tab_columns atc
                 LEFT JOIN (
                     SELECT column_name, position
                     FROM all_constraints ac
-                    JOIN all_cons_columns acc 
-                        ON ac.owner = acc.owner 
+                    JOIN all_cons_columns acc ON ac.owner = acc.owner 
                         AND ac.constraint_name = acc.constraint_name
                     WHERE ac.constraint_type = 'P'
                     AND ac.owner = :1
@@ -169,7 +153,7 @@ async def search_oracle_views(
                 ))
             
             # Get actual row count if not available
-            if not row_count:
+            if not row_count and object_type == 'VIEW':
                 try:
                     cursor.execute(f"""
                         SELECT /*+ FIRST_ROWS(1) */ COUNT(*) 
@@ -182,7 +166,7 @@ async def search_oracle_views(
             tables.append(DatabaseTable(
                 name=table_name,
                 schema=schema_name,
-                rowCount=row_count,
+                rowCount=row_count if row_count is not None else 0,
                 columns=columns,
                 selected=False
             ))
@@ -190,18 +174,13 @@ async def search_oracle_views(
         return tables
         
     except Exception as e:
-        raise Exception(f"Error searching Oracle views: {str(e)}")
+        raise Exception(f"Error fetching Oracle schema: {str(e)}")
         
     finally:
         if cursor:
             cursor.close()
         if conn:
             conn.close()
-
-async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
-    # For Oracle, we'll use the search endpoint instead
-    # This function now returns an empty list
-    return []
 
 async def fetch_sqlite_schema(database_path: str) -> List[DatabaseTable]:
     tables = []
