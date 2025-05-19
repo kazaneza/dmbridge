@@ -1,4 +1,3 @@
-
 import csv
 import os
 from tempfile import mkdtemp
@@ -26,7 +25,7 @@ async def extract_table_chunks(
         if '.db' in connection_string:  # SQLite
             conn = sqlite3.connect(connection_string)
         else:  # Oracle or MSSQL
-            if 'ODBC Driver' in connection_string:
+            if 'ODBC Driver' in connection_string or 'SERVER=' in connection_string.upper():
                 conn = pyodbc.connect(connection_string)
             else:
                 # Set Oracle environment
@@ -124,9 +123,11 @@ async def import_chunk(
     rows_imported = 0
     
     try:
-        # Connect to destination database based on connection string type
-        is_sqlserver = 'ODBC Driver' in connection_string
+        # Detect database type from connection string
+        is_sqlserver = 'ODBC Driver' in connection_string or 'SERVER=' in connection_string.upper()
+        print(f"Destination database type: {'SQL Server' if is_sqlserver else 'Oracle'}")
         
+        # Connect to destination database
         if '.db' in connection_string:
             conn = sqlite3.connect(connection_string)
         elif is_sqlserver:
