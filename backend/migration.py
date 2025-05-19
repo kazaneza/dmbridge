@@ -64,7 +64,9 @@ async def extract_table_chunks(
                 'chunk_number': chunk_num,
                 'total_chunks': total_chunks,
                 'columns': columns,
-                'total_rows': total_rows
+                'total_rows': total_rows,
+                'table_name': table_name,  # Add table_name to the chunk info
+                'schema': schema  # Add schema to the chunk info
             }
             
     except Exception as e:
@@ -79,7 +81,6 @@ async def extract_table_chunks(
 async def import_chunk(
     connection_string: str,
     chunk_info: Dict[str, Any],
-    table_name: str,
     create_table: bool = False
 ) -> int:
     conn = None
@@ -97,6 +98,8 @@ async def import_chunk(
                 conn = cx_Oracle.connect(connection_string)
         
         cursor = conn.cursor()
+        
+        table_name = chunk_info['table_name']  # Get table_name from chunk_info
         
         # Create table if needed
         if create_table:
@@ -168,7 +171,7 @@ def extract_chunk(
 ) -> List[Dict[str, Any]]:
     """Extract a chunk of data from the table"""
     table_identifier = f"{schema}.{table_name}" if schema else table_name
-    columns_str = ', '.join(columns)
+    columns_str = ', '.join([f"[{col}]" for col in columns])
     
     if isinstance(cursor, sqlite3.Cursor):
         query = f"""
