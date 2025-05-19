@@ -46,11 +46,33 @@ async def extract_table_chunks(
         print(f"Starting extraction for {table_name} ({total_rows} rows)")
         print(f"Temp directory: {table_temp_dir}")
         
-        # Extract data in chunks
-        for chunk_num in range(total_chunks):
-            offset = chunk_num * chunk_size
+        # Extract first chunk to test insertion
+        print("Extracting first chunk for testing...")
+        first_chunk = extract_chunk(cursor, table_name, schema, columns, 0, min(chunk_size, total_rows))
+        
+        if not first_chunk:
+            raise Exception("Failed to extract first chunk - no data returned")
             
-            print(f"Processing chunk {chunk_num + 1}/{total_chunks} (rows {offset} to {offset + chunk_size})")
+        # Save first chunk to CSV
+        first_chunk_file = os.path.join(table_temp_dir, "chunk_0.csv")
+        save_chunk_to_csv(first_chunk_file, columns, first_chunk)
+        print(f"First chunk saved to {first_chunk_file}")
+        
+        # Yield first chunk for testing
+        yield {
+            'file': first_chunk_file,
+            'chunk_number': 0,
+            'total_chunks': total_chunks,
+            'columns': columns,
+            'table_name': table_name,
+            'schema': schema,
+            'is_test_chunk': True
+        }
+        
+        # If first chunk succeeds, extract remaining chunks
+        for chunk_num in range(1, total_chunks):
+            offset = chunk_num * chunk_size
+            print(f"Processing chunk {chunk_num}/{total_chunks} (rows {offset} to {min(offset + chunk_size, total_rows)})")
             
             chunk_data = extract_chunk(
                 cursor, 
@@ -61,11 +83,9 @@ async def extract_table_chunks(
                 chunk_size
             )
             
-            # Save chunk to temporary CSV file
+            # Save chunk to CSV
             chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
             save_chunk_to_csv(chunk_file, columns, chunk_data)
-            
-            print(f"Saved chunk to {chunk_file}")
             
             yield {
                 'file': chunk_file,
@@ -73,7 +93,8 @@ async def extract_table_chunks(
                 'total_chunks': total_chunks,
                 'columns': columns,
                 'table_name': table_name,
-                'schema': schema
+                'schema': schema,
+                'is_test_chunk': False
             }
             
     except Exception as e:
@@ -109,7 +130,7 @@ async def import_chunk(
         table_name = chunk_info['table_name']
         chunk_file = chunk_info['file']
         
-        # Create table if needed
+        # Create table if needed (only for first chunk)
         if create_table:
             create_table_query = generate_create_table_query(
                 table_name, 
@@ -142,6 +163,11 @@ async def import_chunk(
         
         conn.commit()
         print(f"Successfully imported {rows_imported} rows")
+        
+        # Only remove test chunk file
+        if chunk_info.get('is_test_chunk'):
+            os.remove(chunk_file)
+            print(f"Removed test chunk file {chunk_file}")
         
         return rows_imported
         
@@ -216,7 +242,9 @@ def extract_chunk(
         print(f"Executing query:\n{query}")
         cursor.execute(query)
     
-    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+    rows = cursor.fetchall()
+    print(f"Fetched {len(rows)} rows")
+    return [dict(zip(columns, row)) for row in rows]
 
 def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, Any]]) -> None:
     """Save chunk data to a CSV file"""
