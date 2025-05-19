@@ -47,6 +47,23 @@ def init_db():
 
 init_db()
 
+def get_mssql_connection_string(connection: dict) -> str:
+    """Helper function to build SQL Server connection string"""
+    if connection['connection_string']:
+        # If custom connection string is provided, ensure it has the driver
+        if 'DRIVER=' not in connection['connection_string']:
+            return f"DRIVER={{ODBC Driver 17 for SQL Server}};{connection['connection_string']}"
+        return connection['connection_string']
+    
+    # Build connection string from individual fields
+    return (
+        f"DRIVER={{ODBC Driver 17 for SQL Server}};"
+        f"SERVER={connection['host']},{connection['port']};"
+        f"DATABASE={connection['database']};"
+        f"UID={connection['username']};"
+        f"PWD={connection['password']}"
+    )
+
 @app.get("/api/connections")
 async def get_connections():
     conn = sqlite3.connect('connections.db')
@@ -110,15 +127,7 @@ async def get_schema(connection_id: str) -> List[DatabaseTable]:
     
     try:
         if connection['type'] == 'mssql':
-            conn_str = connection['connection_string']
-            if not conn_str:
-                conn_str = (
-                    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                    f"SERVER={connection['host']},{connection['port']};"
-                    f"DATABASE={connection['database']};"
-                    f"UID={connection['username']};"
-                    f"PWD={connection['password']}"
-                )
+            conn_str = get_mssql_connection_string(connection)
             return await fetch_mssql_schema(conn_str)
             
         elif connection['type'] == 'oracle':
@@ -251,15 +260,7 @@ async def test_connection(connection: Connection):
             return {"success": True, "message": "Connection successful"}
             
         elif connection.type == 'mssql':
-            conn_str = connection.connection_string
-            if not conn_str:
-                conn_str = (
-                    f"DRIVER={{ODBC Driver 17 for SQL Server}};"
-                    f"SERVER={connection.host},{connection.port};"
-                    f"DATABASE={connection.database};"
-                    f"UID={connection.username};"
-                    f"PWD={connection.password}"
-                )
+            conn_str = get_mssql_connection_string(dict(connection))
             
             conn = pyodbc.connect(conn_str, timeout=5)
             cursor = conn.cursor()
@@ -313,7 +314,7 @@ async def start_migration(request: MigrationRequest):
     try:
         # Extract chunks from source
         source_conn_str = source_conn['connection_string'] or f"{source_conn['username']}/{source_conn['password']}@{source_conn['host']}:{source_conn['port']}/{source_conn['database']}"
-        dest_conn_str = dest_conn['connection_string'] or f"{dest_conn['username']}/{dest_conn['password']}@{dest_conn['host']}:{dest_conn['port']}/{dest_conn['database']}"
+        dest_conn_str = get_mssql_connection_string(dest_conn)
         
         chunks_processed = 0
         async for chunk in extract_table_chunks(
