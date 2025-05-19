@@ -47,7 +47,7 @@ export const createMigrationTables = (
       selectedColumns: table.columns
         .filter(column => column.selected)
         .map(column => column.name),
-      destinationTable: `${table.name}_migrated`, // Create new table with _migrated suffix
+      destinationTable: table.name, // Use the same table name
     }));
 };
 
@@ -67,7 +67,7 @@ export const initializeMigrationProgress = (
     overallProgress: 0,
     estimatedTimeRemaining: 0,
     errors: [],
-    status: 'pending',
+    status: 'extracting',
     currentChunk: 0,
     totalChunks: 0
   };
@@ -93,36 +93,59 @@ export const runMigration = async (
   config: MigrationConfig,
   onProgress: (progress: MigrationProgress) => void
 ): Promise<void> => {
+  let progress = initializeMigrationProgress(config.id, config.selectedTables);
+  onProgress(progress);
+
   try {
     const response = await fetch('http://localhost:8000/api/migration/start', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(config)
+      body: JSON.stringify({
+        source_connection_id: config.sourceConnectionId,
+        destination_connection_id: config.destinationConnectionId,
+        table_name: config.selectedTables[0].name,
+        schema: config.selectedTables[0].schema,
+        chunk_size: config.options.batchSize,
+        selected_columns: config.selectedTables[0].selectedColumns
+      })
     });
 
     if (!response.ok) {
-      throw new Error('Failed to start migration');
+      const error = await response.json();
+      throw new Error(error.detail || 'Failed to start migration');
     }
 
-    // Set up event source for progress updates
-    const eventSource = new EventSource(`http://localhost:8000/api/migration/${config.id}/progress`);
+    const result = await response.json();
     
-    eventSource.onmessage = (event) => {
-      const progress = JSON.parse(event.data);
-      onProgress(progress);
-      
-      if (progress.status === 'completed' || progress.status === 'failed') {
-        eventSource.close();
-      }
+    // Update progress with actual data
+    progress = {
+      ...progress,
+      processedRows: result.chunks_processed * config.options.batchSize,
+      currentTableProgress: 100,
+      overallProgress: 100,
+      status: 'completed',
+      endTime: new Date(),
+      estimatedTimeRemaining: 0
     };
-
-    eventSource.onerror = () => {
-      eventSource.close();
-      throw new Error('Lost connection to migration progress stream');
-    };
+    
+    onProgress(progress);
   } catch (error) {
-    throw new Error(`Migration failed: ${error.message}`);
+    progress = {
+      ...progress,
+      status: 'failed',
+      endTime: new Date(),
+      errors: [
+        ...progress.errors,
+        {
+          table: config.selectedTables[0].name,
+          message: error.message,
+          timestamp: new Date()
+        }
+      ]
+    };
+    onProgress(progress);
+    throw error;
   }
 };
