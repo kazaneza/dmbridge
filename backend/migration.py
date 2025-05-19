@@ -1,4 +1,4 @@
-```python
+
 import csv
 import os
 from tempfile import mkdtemp
@@ -279,4 +279,3 @@ def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[A
         """
     
     cursor.executemany(query, batch)
-```
