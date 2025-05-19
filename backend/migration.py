@@ -10,6 +10,13 @@ from models import MigrationChunk
 TEMP_DIR = mkdtemp()
 CHUNK_SIZE = 1000000  # Process 1M rows at a time
 
+def handle_clob(cursor, name, default_type, size, precision, scale):
+    if default_type == cx_Oracle.CLOB:
+        return cursor.var(cx_Oracle.LONG_STRING)
+    if default_type == cx_Oracle.BLOB:
+        return cursor.var(cx_Oracle.LONG_BINARY)
+    return None
+
 async def extract_table_chunks(
     connection_string: str,
     table_name: str,
@@ -31,7 +38,7 @@ async def extract_table_chunks(
                 # Set Oracle environment
                 os.environ["NLS_LANG"] = ".AL32UTF8"
                 conn = cx_Oracle.connect(connection_string)
-                conn.outputtypehandler = lambda cursor, name, defaultType, size, precision, scale: str
+                conn.outputtypehandler = handle_clob
         
         cursor = conn.cursor()
         
@@ -74,11 +81,19 @@ async def extract_table_chunks(
                     }
                 break
                 
-            rows.append(row)
+            # Convert all values to strings, handling LOBs
+            processed_row = []
+            for val in row:
+                if isinstance(val, (cx_Oracle.LOB, cx_Oracle.CLOB, cx_Oracle.BLOB)):
+                    processed_row.append(val.read() if val else '')
+                else:
+                    processed_row.append(str(val) if val is not None else '')
+            
+            rows.append(processed_row)
             
             if len(rows) >= chunk_size:
                 chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
-                chunk_data = [dict(zip(columns, [str(val) if val is not None else '' for val in r])) for r in rows]
+                chunk_data = [dict(zip(columns, r)) for r in rows]
                 save_chunk_to_csv(chunk_file, columns, chunk_data)
                 print(f"Saved chunk {chunk_num} with {len(rows)} rows")
                 yield {
