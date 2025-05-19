@@ -28,7 +28,10 @@ async def extract_table_chunks(
             if 'ODBC Driver' in connection_string:
                 conn = pyodbc.connect(connection_string)
             else:
+                # Set Oracle environment
+                os.environ["NLS_LANG"] = ".AL32UTF8"
                 conn = cx_Oracle.connect(connection_string)
+                conn.outputtypehandler = lambda cursor, name, defaultType, size, precision, scale: str
         
         cursor = conn.cursor()
         
@@ -58,7 +61,7 @@ async def extract_table_chunks(
             if not row:
                 if rows:  # Save last chunk
                     chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
-                    chunk_data = [dict(zip(columns, r)) for r in rows]
+                    chunk_data = [dict(zip(columns, [str(val) if val is not None else '' for val in r])) for r in rows]
                     save_chunk_to_csv(chunk_file, columns, chunk_data)
                     print(f"Saved final chunk {chunk_num} with {len(rows)} rows")
                     yield {
@@ -75,7 +78,7 @@ async def extract_table_chunks(
             
             if len(rows) >= chunk_size:
                 chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
-                chunk_data = [dict(zip(columns, r)) for r in rows]
+                chunk_data = [dict(zip(columns, [str(val) if val is not None else '' for val in r])) for r in rows]
                 save_chunk_to_csv(chunk_file, columns, chunk_data)
                 print(f"Saved chunk {chunk_num} with {len(rows)} rows")
                 yield {
@@ -118,7 +121,10 @@ async def import_chunk(
             if 'ODBC Driver' in connection_string:
                 conn = pyodbc.connect(connection_string)
             else:
+                # Set Oracle environment
+                os.environ["NLS_LANG"] = ".AL32UTF8"
                 conn = cx_Oracle.connect(connection_string)
+                conn.autocommit = False  # Ensure transaction control
         
         cursor = conn.cursor()
         
@@ -142,21 +148,22 @@ async def import_chunk(
             batch = []
             
             for row in reader:
-                batch.append(list(row.values()))
+                batch.append([row[col] for col in chunk_info['columns']])
                 rows_imported += 1
                 
-                # Execute in batches of 1000
-                if len(batch) >= 1000:
+                # Execute in smaller batches for Oracle
+                if len(batch) >= 100:  # Reduced batch size for Oracle
                     import_batch(cursor, table_name, chunk_info['columns'], batch)
                     print(f"Imported {rows_imported} rows")
                     batch = []
+                    conn.commit()  # Commit each batch
             
             # Import remaining rows
             if batch:
                 import_batch(cursor, table_name, chunk_info['columns'], batch)
                 print(f"Imported final {len(batch)} rows")
+                conn.commit()
         
-        conn.commit()
         print(f"Successfully imported {rows_imported} rows")
         
         # Clean up CSV file after successful import
@@ -210,8 +217,8 @@ def generate_create_table_query(table_name: str, columns: List[str]) -> str:
 
 def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[Any]]) -> None:
     """Import a batch of rows"""
-    placeholders = ','.join(['?' for _ in columns])
     columns_str = ','.join([f'"{col}"' for col in columns])
+    placeholders = ','.join([':' + str(i+1) for i in range(len(columns))])
     query = f"""
         INSERT INTO {table_name} ({columns_str})
         VALUES ({placeholders})
