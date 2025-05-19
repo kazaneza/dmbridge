@@ -130,10 +130,7 @@ async def import_chunk(
             if 'ODBC Driver' in connection_string:
                 conn = pyodbc.connect(connection_string)
             else:
-                # Set Oracle environment
-                os.environ["NLS_LANG"] = ".AL32UTF8"
                 conn = cx_Oracle.connect(connection_string)
-                conn.autocommit = False  # Ensure transaction control
         
         cursor = conn.cursor()
         
@@ -144,7 +141,8 @@ async def import_chunk(
         if create_table:
             create_table_query = generate_create_table_query(
                 table_name, 
-                chunk_info['columns']
+                chunk_info['columns'],
+                'ODBC Driver' in connection_string  # Is SQL Server?
             )
             print(f"Creating table {table_name}")
             print(f"Query: {create_table_query}")
@@ -160,16 +158,28 @@ async def import_chunk(
                 batch.append([row[col] for col in chunk_info['columns']])
                 rows_imported += 1
                 
-                # Execute in smaller batches for Oracle
-                if len(batch) >= 100:  # Reduced batch size for Oracle
-                    import_batch(cursor, table_name, chunk_info['columns'], batch)
+                # Execute in batches
+                if len(batch) >= 1000:  # Smaller batch size for better performance
+                    import_batch(
+                        cursor, 
+                        table_name, 
+                        chunk_info['columns'],
+                        batch,
+                        'ODBC Driver' in connection_string  # Is SQL Server?
+                    )
                     print(f"Imported {rows_imported} rows")
                     batch = []
                     conn.commit()  # Commit each batch
             
             # Import remaining rows
             if batch:
-                import_batch(cursor, table_name, chunk_info['columns'], batch)
+                import_batch(
+                    cursor, 
+                    table_name, 
+                    chunk_info['columns'],
+                    batch,
+                    'ODBC Driver' in connection_string  # Is SQL Server?
+                )
                 print(f"Imported final {len(batch)} rows")
                 conn.commit()
         
@@ -215,21 +225,43 @@ def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, An
     
     print(f"Saved chunk to {filename}")
 
-def generate_create_table_query(table_name: str, columns: List[str]) -> str:
+def generate_create_table_query(table_name: str, columns: List[str], is_sqlserver: bool = False) -> str:
     """Generate CREATE TABLE query with appropriate column types"""
-    column_defs = [f'"{col}" NVARCHAR2(4000)' for col in columns]
-    return f"""
-        CREATE TABLE {table_name} (
-            {', '.join(column_defs)}
-        )
-    """
+    if is_sqlserver:
+        # Use NVARCHAR(MAX) for SQL Server to handle large text
+        column_defs = [f'[{col}] NVARCHAR(MAX)' for col in columns]
+        return f"""
+            IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'{table_name}') AND type in (N'U'))
+            CREATE TABLE {table_name} (
+                {', '.join(column_defs)}
+            )
+        """
+    else:
+        # Oracle syntax
+        column_defs = [f'"{col}" NVARCHAR2(4000)' for col in columns]
+        return f"""
+            CREATE TABLE {table_name} (
+                {', '.join(column_defs)}
+            )
+        """
 
-def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[Any]]) -> None:
+def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[Any]], is_sqlserver: bool = False) -> None:
     """Import a batch of rows"""
-    columns_str = ','.join([f'"{col}"' for col in columns])
-    placeholders = ','.join([':' + str(i+1) for i in range(len(columns))])
-    query = f"""
-        INSERT INTO {table_name} ({columns_str})
-        VALUES ({placeholders})
-    """
+    if is_sqlserver:
+        # SQL Server syntax
+        columns_str = ','.join([f'[{col}]' for col in columns])
+        placeholders = ','.join(['?' for _ in columns])
+        query = f"""
+            INSERT INTO {table_name} ({columns_str})
+            VALUES ({placeholders})
+        """
+    else:
+        # Oracle syntax
+        columns_str = ','.join([f'"{col}"' for col in columns])
+        placeholders = ','.join([':' + str(i+1) for i in range(len(columns))])
+        query = f"""
+            INSERT INTO {table_name} ({columns_str})
+            VALUES ({placeholders})
+        """
+    
     cursor.executemany(query, batch)
