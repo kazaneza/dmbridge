@@ -39,8 +39,8 @@ async def extract_table_chunks(
         total_rows = get_row_count(cursor, table_name, schema)
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
-        # Create temp directory for this table if it doesn't exist
-        table_temp_dir = os.path.join(TEMP_DIR, f"T24_{table_name}")
+        # Create temp directory for this table
+        table_temp_dir = os.path.join(TEMP_DIR, f"{table_name}")
         os.makedirs(table_temp_dir, exist_ok=True)
         
         print(f"Starting extraction for {table_name} ({total_rows} rows)")
@@ -50,7 +50,7 @@ async def extract_table_chunks(
         for chunk_num in range(total_chunks):
             offset = chunk_num * chunk_size
             
-            print(f"Extracting chunk {chunk_num + 1}/{total_chunks} ({offset} to {offset + chunk_size})")
+            print(f"Processing chunk {chunk_num + 1}/{total_chunks} (rows {offset} to {offset + chunk_size})")
             
             chunk_data = extract_chunk(
                 cursor, 
@@ -65,14 +65,13 @@ async def extract_table_chunks(
             chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
             save_chunk_to_csv(chunk_file, columns, chunk_data)
             
-            print(f"Saved chunk {chunk_num + 1}/{total_chunks} to {chunk_file}")
+            print(f"Saved chunk to {chunk_file}")
             
             yield {
                 'file': chunk_file,
                 'chunk_number': chunk_num,
                 'total_chunks': total_chunks,
                 'columns': columns,
-                'total_rows': total_rows,
                 'table_name': table_name,
                 'schema': schema
             }
@@ -143,8 +142,6 @@ async def import_chunk(
         
         conn.commit()
         print(f"Successfully imported {rows_imported} rows")
-        
-        # Keep the CSV file for now - only remove after successful migration
         
         return rows_imported
         
@@ -225,10 +222,12 @@ def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, An
     """Save chunk data to a CSV file"""
     print(f"Saving {len(data)} rows to {filename}")
     os.makedirs(os.path.dirname(filename), exist_ok=True)
+    
     with open(filename, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         writer.writeheader()
         writer.writerows(data)
+    
     print(f"Saved chunk to {filename}")
 
 def generate_create_table_query(table_name: str, columns: List[str]) -> str:
