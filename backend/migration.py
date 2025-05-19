@@ -43,6 +43,9 @@ async def extract_table_chunks(
         table_temp_dir = os.path.join(TEMP_DIR, f"{schema}_{table_name}" if schema else table_name)
         os.makedirs(table_temp_dir, exist_ok=True)
         
+        print(f"Starting extraction for {table_name} ({total_rows} rows)")
+        print(f"Temp directory: {table_temp_dir}")
+        
         # Extract data in chunks
         for chunk_num in range(total_chunks):
             offset = chunk_num * chunk_size
@@ -58,6 +61,8 @@ async def extract_table_chunks(
             # Save chunk to temporary CSV file
             chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
             save_chunk_to_csv(chunk_file, columns, chunk_data)
+            
+            print(f"Saved chunk {chunk_num + 1}/{total_chunks} to {chunk_file}")
             
             yield {
                 'file': chunk_file,
@@ -107,9 +112,11 @@ async def import_chunk(
                 table_name, 
                 chunk_info['columns']
             )
+            print(f"Creating table with query: {create_table_query}")
             cursor.execute(create_table_query)
         
         # Import data from CSV
+        print(f"Importing data from {chunk_info['file']}")
         with open(chunk_info['file'], 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             batch = []
@@ -121,13 +128,16 @@ async def import_chunk(
                 # Execute in batches of 1000
                 if len(batch) >= 1000:
                     import_batch(cursor, table_name, chunk_info['columns'], batch)
+                    print(f"Imported {rows_imported} rows")
                     batch = []
             
             # Import remaining rows
             if batch:
                 import_batch(cursor, table_name, chunk_info['columns'], batch)
+                print(f"Imported final {len(batch)} rows")
         
         conn.commit()
+        print(f"Successfully imported {rows_imported} rows")
         
         # Don't remove the file yet - keep it for potential retries
         # Only remove when all chunks are successfully processed
@@ -200,11 +210,13 @@ def extract_chunk(
             OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
         """
     
+    print(f"Executing query: {query}")
     cursor.execute(query)
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, Any]]) -> None:
     """Save chunk data to a CSV file"""
+    print(f"Saving {len(data)} rows to {filename}")
     with open(filename, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         writer.writeheader()
