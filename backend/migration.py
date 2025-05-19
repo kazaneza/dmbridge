@@ -39,6 +39,10 @@ async def extract_table_chunks(
         total_rows = get_row_count(cursor, table_name, schema)
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
+        # Create temp directory for this table if it doesn't exist
+        table_temp_dir = os.path.join(TEMP_DIR, f"{schema}_{table_name}" if schema else table_name)
+        os.makedirs(table_temp_dir, exist_ok=True)
+        
         # Extract data in chunks
         for chunk_num in range(total_chunks):
             offset = chunk_num * chunk_size
@@ -52,14 +56,15 @@ async def extract_table_chunks(
             )
             
             # Save chunk to temporary CSV file
-            chunk_file = os.path.join(TEMP_DIR, f"{table_name}_{chunk_num}.csv")
+            chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
             save_chunk_to_csv(chunk_file, columns, chunk_data)
             
             yield {
                 'file': chunk_file,
                 'chunk_number': chunk_num,
                 'total_chunks': total_chunks,
-                'columns': columns
+                'columns': columns,
+                'total_rows': total_rows
             }
             
     except Exception as e:
@@ -102,7 +107,7 @@ async def import_chunk(
             cursor.execute(create_table_query)
         
         # Import data from CSV
-        with open(chunk_info['file'], 'r') as f:
+        with open(chunk_info['file'], 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             batch = []
             
@@ -121,8 +126,8 @@ async def import_chunk(
         
         conn.commit()
         
-        # Clean up temporary file
-        os.remove(chunk_info['file'])
+        # Don't remove the file yet - keep it for potential retries
+        # Only remove when all chunks are successfully processed
         
         return rows_imported
         
@@ -181,16 +186,16 @@ def extract_chunk(
 
 def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, Any]]) -> None:
     """Save chunk data to a CSV file"""
-    with open(filename, 'w', newline='') as f:
+    with open(filename, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         writer.writeheader()
         writer.writerows(data)
 
 def generate_create_table_query(table_name: str, columns: List[str]) -> str:
-    """Generate CREATE TABLE query"""
-    column_defs = [f"{col} TEXT" for col in columns]
+    """Generate CREATE TABLE query with all columns as NVARCHAR(MAX)"""
+    column_defs = [f"[{col}] NVARCHAR(MAX)" for col in columns]
     return f"""
-        CREATE TABLE IF NOT EXISTS {table_name} (
+        CREATE TABLE {table_name} (
             {', '.join(column_defs)}
         )
     """
@@ -199,7 +204,7 @@ def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[A
     """Import a batch of rows"""
     placeholders = ','.join(['?' for _ in columns])
     query = f"""
-        INSERT INTO {table_name} ({','.join(columns)})
+        INSERT INTO {table_name} ({','.join([f'[{col}]' for col in columns])})
         VALUES ({placeholders})
     """
     cursor.executemany(query, batch)
