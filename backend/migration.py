@@ -40,7 +40,7 @@ async def extract_table_chunks(
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
         # Create temp directory for this table
-        table_temp_dir = os.path.join(TEMP_DIR, f"{table_name}")
+        table_temp_dir = os.path.join(TEMP_DIR, f"T24_{table_name}")
         os.makedirs(table_temp_dir, exist_ok=True)
         
         print(f"Starting extraction for {table_name} ({total_rows} rows)")
@@ -48,7 +48,22 @@ async def extract_table_chunks(
         
         # Extract first chunk to test insertion
         print("Extracting first chunk for testing...")
-        first_chunk = extract_chunk(cursor, table_name, schema, columns, 0, min(chunk_size, total_rows))
+        
+        # For Oracle, use a simpler query for the first chunk
+        if isinstance(cursor, cx_Oracle.Cursor):
+            columns_str = ', '.join([f'"{col}"' for col in columns])
+            table_identifier = f"{schema}.{table_name}" if schema else table_name
+            query = f"""
+                SELECT {columns_str}
+                FROM {table_identifier}
+                WHERE ROWNUM <= :chunk_size
+            """
+            print(f"Executing query:\n{query}")
+            cursor.execute(query, {'chunk_size': min(chunk_size, total_rows)})
+            rows = cursor.fetchall()
+            first_chunk = [dict(zip(columns, row)) for row in rows]
+        else:
+            first_chunk = extract_chunk(cursor, table_name, schema, columns, 0, min(chunk_size, total_rows))
         
         if not first_chunk:
             raise Exception("Failed to extract first chunk - no data returned")
@@ -70,32 +85,68 @@ async def extract_table_chunks(
         }
         
         # If first chunk succeeds, extract remaining chunks
-        for chunk_num in range(1, total_chunks):
-            offset = chunk_num * chunk_size
-            print(f"Processing chunk {chunk_num}/{total_chunks} (rows {offset} to {min(offset + chunk_size, total_rows)})")
-            
-            chunk_data = extract_chunk(
-                cursor, 
-                table_name, 
-                schema, 
-                columns, 
-                offset, 
-                chunk_size
-            )
-            
-            # Save chunk to CSV
-            chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
-            save_chunk_to_csv(chunk_file, columns, chunk_data)
-            
-            yield {
-                'file': chunk_file,
-                'chunk_number': chunk_num,
-                'total_chunks': total_chunks,
-                'columns': columns,
-                'table_name': table_name,
-                'schema': schema,
-                'is_test_chunk': False
-            }
+        if isinstance(cursor, cx_Oracle.Cursor):
+            # For Oracle, use a different pagination approach
+            for chunk_num in range(1, total_chunks):
+                start_row = chunk_num * chunk_size
+                end_row = min((chunk_num + 1) * chunk_size, total_rows)
+                
+                print(f"Processing chunk {chunk_num}/{total_chunks} (rows {start_row} to {end_row})")
+                
+                query = f"""
+                    SELECT {columns_str}
+                    FROM {table_identifier}
+                    WHERE ROWNUM <= :end_row
+                    MINUS
+                    SELECT {columns_str}
+                    FROM {table_identifier}
+                    WHERE ROWNUM <= :start_row
+                """
+                print(f"Executing query:\n{query}")
+                cursor.execute(query, {'start_row': start_row, 'end_row': end_row})
+                rows = cursor.fetchall()
+                chunk_data = [dict(zip(columns, row)) for row in rows]
+                
+                # Save chunk to CSV
+                chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
+                save_chunk_to_csv(chunk_file, columns, chunk_data)
+                
+                yield {
+                    'file': chunk_file,
+                    'chunk_number': chunk_num,
+                    'total_chunks': total_chunks,
+                    'columns': columns,
+                    'table_name': table_name,
+                    'schema': schema,
+                    'is_test_chunk': False
+                }
+        else:
+            for chunk_num in range(1, total_chunks):
+                offset = chunk_num * chunk_size
+                print(f"Processing chunk {chunk_num}/{total_chunks} (rows {offset} to {min(offset + chunk_size, total_rows)})")
+                
+                chunk_data = extract_chunk(
+                    cursor, 
+                    table_name, 
+                    schema, 
+                    columns, 
+                    offset, 
+                    chunk_size
+                )
+                
+                # Save chunk to CSV
+                chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
+                save_chunk_to_csv(chunk_file, columns, chunk_data)
+                
+                yield {
+                    'file': chunk_file,
+                    'chunk_number': chunk_num,
+                    'total_chunks': total_chunks,
+                    'columns': columns,
+                    'table_name': table_name,
+                    'schema': schema,
+                    'is_test_chunk': False
+                }
             
     except Exception as e:
         raise Exception(f"Error extracting data: {str(e)}")
@@ -215,32 +266,15 @@ def extract_chunk(
             SELECT {columns_str} FROM {table_identifier}
             LIMIT {chunk_size} OFFSET {offset}
         """
-    elif isinstance(cursor, cx_Oracle.Cursor):
-        query = f"""
-            SELECT {columns_str}
-            FROM (
-                SELECT a.*, ROWNUM rnum
-                FROM (
-                    SELECT {columns_str}
-                    FROM {table_identifier}
-                    ORDER BY 1
-                ) a WHERE ROWNUM <= :end_row
-            )
-            WHERE rnum > :start_row
-        """
-        print(f"Executing query:\n{query}")
-        cursor.execute(query, {'start_row': offset, 'end_row': offset + chunk_size})
     else:
         query = f"""
             SELECT {columns_str} FROM {table_identifier}
             ORDER BY 1
             OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
         """
-        cursor.execute(query)
     
-    if not isinstance(cursor, cx_Oracle.Cursor):
-        print(f"Executing query:\n{query}")
-        cursor.execute(query)
+    print(f"Executing query:\n{query}")
+    cursor.execute(query)
     
     rows = cursor.fetchall()
     print(f"Fetched {len(rows)} rows")
