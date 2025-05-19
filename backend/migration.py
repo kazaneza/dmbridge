@@ -38,7 +38,7 @@ async def extract_table_chunks(
         table_identifier = f"{schema}.{table_name}" if schema else table_name
         
         # Create temp directory for this table
-        table_temp_dir = os.path.join(TEMP_DIR, f"{table_name}")
+        table_temp_dir = os.path.join(TEMP_DIR, table_name)
         os.makedirs(table_temp_dir, exist_ok=True)
         
         print(f"Starting extraction for {table_name}")
@@ -52,14 +52,15 @@ async def extract_table_chunks(
         
         chunk_num = 0
         rows = []
-        chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
         
         while True:
             row = cursor.fetchone()
             if not row:
                 if rows:  # Save last chunk
+                    chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
                     chunk_data = [dict(zip(columns, r)) for r in rows]
                     save_chunk_to_csv(chunk_file, columns, chunk_data)
+                    print(f"Saved final chunk {chunk_num} with {len(rows)} rows")
                     yield {
                         'file': chunk_file,
                         'chunk_number': chunk_num,
@@ -73,8 +74,10 @@ async def extract_table_chunks(
             rows.append(row)
             
             if len(rows) >= chunk_size:
+                chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
                 chunk_data = [dict(zip(columns, r)) for r in rows]
                 save_chunk_to_csv(chunk_file, columns, chunk_data)
+                print(f"Saved chunk {chunk_num} with {len(rows)} rows")
                 yield {
                     'file': chunk_file,
                     'chunk_number': chunk_num,
@@ -87,9 +90,9 @@ async def extract_table_chunks(
                 # Reset for next chunk
                 rows = []
                 chunk_num += 1
-                chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
                 
     except Exception as e:
+        print(f"Error during extraction: {str(e)}")
         raise Exception(f"Error extracting data: {str(e)}")
         
     finally:
@@ -163,6 +166,7 @@ async def import_chunk(
         return rows_imported
         
     except Exception as e:
+        print(f"Error during import: {str(e)}")
         if conn:
             conn.rollback()
         raise Exception(f"Error importing data: {str(e)}")
@@ -207,8 +211,9 @@ def generate_create_table_query(table_name: str, columns: List[str]) -> str:
 def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[Any]]) -> None:
     """Import a batch of rows"""
     placeholders = ','.join(['?' for _ in columns])
+    columns_str = ','.join([f'"{col}"' for col in columns])
     query = f"""
-        INSERT INTO {table_name} ({','.join([f'"{col}"' for col in columns])})
+        INSERT INTO {table_name} ({columns_str})
         VALUES ({placeholders})
     """
     cursor.executemany(query, batch)
