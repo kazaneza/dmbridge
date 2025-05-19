@@ -3,7 +3,7 @@ import { useAppContext } from '../context/AppContext';
 import { DatabaseConnection } from '../types/database';
 import ConnectionForm from '../components/DatabaseConnection/ConnectionForm';
 import ConnectionCard from '../components/DatabaseConnection/ConnectionCard';
-import { PlusCircle, RefreshCw } from 'lucide-react';
+import { PlusCircle, RefreshCw, Database } from 'lucide-react';
 import { loadConnections, saveConnection } from '../utils/databaseUtils';
 
 const ConnectionsPage: React.FC = () => {
@@ -11,9 +11,12 @@ const ConnectionsPage: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingConnection, setEditingConnection] = useState<DatabaseConnection | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
 
   useEffect(() => {
     loadSavedConnections();
+    const timer = setTimeout(() => setIsInitialLoad(false), 1500);
+    return () => clearTimeout(timer);
   }, []);
 
   const loadSavedConnections = async () => {
@@ -73,6 +76,21 @@ const ConnectionsPage: React.FC = () => {
       dispatch({ type: 'SET_CURRENT_STEP', payload: 'tables' });
     }
   };
+
+  if (isInitialLoad) {
+    return (
+      <div className="fixed inset-0 bg-gradient-to-r from-blue-900 to-blue-800 flex items-center justify-center">
+        <div className="text-center">
+          <div className="flex items-center justify-center mb-6">
+            <span className="text-4xl font-bold text-white mr-3">BK</span>
+            <Database className="h-12 w-12 text-white animate-pulse" />
+          </div>
+          <h1 className="text-2xl font-light text-white mb-2">DataBridge</h1>
+          <p className="text-blue-200">Initializing your data management solution...</p>
+        </div>
+      </div>
+    );
+  }
 
   const renderContent = () => {
     if (showAddForm) {
