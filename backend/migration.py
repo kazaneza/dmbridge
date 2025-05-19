@@ -124,14 +124,16 @@ async def import_chunk(
     
     try:
         # Detect database type from connection string
-        is_sqlserver = 'ODBC Driver' in connection_string or 'SERVER=' in connection_string.upper()
+        is_sqlserver = ('ODBC Driver' in connection_string or 
+                       'SERVER=' in connection_string.upper() or
+                       'DRIVER={SQL Server}' in connection_string)
         print(f"Destination database type: {'SQL Server' if is_sqlserver else 'Oracle'}")
         
         # Connect to destination database
         if '.db' in connection_string:
             conn = sqlite3.connect(connection_string)
         elif is_sqlserver:
-            conn = pyodbc.connect(connection_string)
+            conn = pyodbc.connect(connection_string, autocommit=False)
         else:
             conn = cx_Oracle.connect(connection_string)
         
@@ -142,15 +144,26 @@ async def import_chunk(
         
         # Create table if needed (only for first chunk)
         if create_table:
-            create_table_query = generate_create_table_query(
-                table_name, 
-                chunk_info['columns'],
-                is_sqlserver
-            )
-            print(f"Creating table {table_name}")
-            print(f"Query: {create_table_query}")
-            cursor.execute(create_table_query)
-            conn.commit()
+            if is_sqlserver:
+                # Check if table exists first
+                cursor.execute(f"""
+                    IF NOT EXISTS (SELECT * FROM sys.objects 
+                    WHERE object_id = OBJECT_ID(N'{table_name}') AND type in (N'U'))
+                    BEGIN
+                        CREATE TABLE {table_name} (
+                            {', '.join([f'[{col}] NVARCHAR(MAX)' for col in chunk_info['columns']])}
+                        )
+                    END
+                """)
+                conn.commit()
+            else:
+                create_table_query = generate_create_table_query(
+                    table_name, 
+                    chunk_info['columns'],
+                    is_sqlserver
+                )
+                cursor.execute(create_table_query)
+                conn.commit()
         
         # Import data from CSV
         print(f"Importing data from {chunk_file}")
@@ -173,6 +186,37 @@ async def import_chunk(
                 
                 # Execute in batches
                 if len(batch) >= 1000:  # Smaller batch size for better performance
+                    if is_sqlserver:
+                        columns_str = ','.join([f'[{col}]' for col in chunk_info['columns']])
+                        placeholders = ','.join(['?' for _ in chunk_info['columns']])
+                        query = f"""
+                            INSERT INTO {table_name} ({columns_str})
+                            VALUES ({placeholders})
+                        """
+                        cursor.executemany(query, batch)
+                    else:
+                        import_batch(
+                            cursor, 
+                            table_name, 
+                            chunk_info['columns'],
+                            batch,
+                            is_sqlserver
+                        )
+                    print(f"Imported {rows_imported} rows")
+                    batch = []
+                    conn.commit()  # Commit each batch
+            
+            # Import remaining rows
+            if batch:
+                if is_sqlserver:
+                    columns_str = ','.join([f'[{col}]' for col in chunk_info['columns']])
+                    placeholders = ','.join(['?' for _ in chunk_info['columns']])
+                    query = f"""
+                        INSERT INTO {table_name} ({columns_str})
+                        VALUES ({placeholders})
+                    """
+                    cursor.executemany(query, batch)
+                else:
                     import_batch(
                         cursor, 
                         table_name, 
@@ -180,19 +224,6 @@ async def import_chunk(
                         batch,
                         is_sqlserver
                     )
-                    print(f"Imported {rows_imported} rows")
-                    batch = []
-                    conn.commit()  # Commit each batch
-            
-            # Import remaining rows
-            if batch:
-                import_batch(
-                    cursor, 
-                    table_name, 
-                    chunk_info['columns'],
-                    batch,
-                    is_sqlserver
-                )
                 print(f"Imported final {len(batch)} rows")
                 conn.commit()
         
@@ -207,14 +238,23 @@ async def import_chunk(
     except Exception as e:
         print(f"Error during import: {str(e)}")
         if conn:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except:
+                pass  # Ignore rollback errors
         raise Exception(f"Error importing data: {str(e)}")
         
     finally:
         if cursor:
-            cursor.close()
+            try:
+                cursor.close()
+            except:
+                pass
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except:
+                pass
 
 def get_table_columns(cursor, table_name: str, schema: Optional[str] = None) -> List[str]:
     """Get column names for the table"""
