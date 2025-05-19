@@ -95,8 +95,18 @@ async def search_oracle_views(
     cursor = None
     
     try:
+        # Set Oracle environment for UTF-8
+        os.environ["NLS_LANG"] = ".AL32UTF8"
+        
+        # Increase fetch array size
+        cx_Oracle.init_oracle_client()
+        
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
+        
+        # Set larger buffer size
+        cursor.arraysize = 1000
+        cursor.setinputsizes(None, cx_Oracle.CLOB)
         
         # Build the search condition
         where_clause = "WHERE object_type = 'VIEW'"
@@ -126,12 +136,14 @@ async def search_oracle_views(
         for table in tables_data:
             schema_name, table_name = table
             
-            # Get columns for this view
+            # Get columns for this view with increased buffer size
             cursor.execute("""
                 SELECT 
                     column_name,
                     data_type,
-                    nullable
+                    nullable,
+                    data_length,
+                    char_length
                 FROM all_tab_columns
                 WHERE owner = :1
                 AND table_name = :2
@@ -140,10 +152,18 @@ async def search_oracle_views(
             
             columns = []
             for col in cursor.fetchall():
-                column_name, data_type, nullable = col
+                column_name, data_type, nullable, data_length, char_length = col
+                # Adjust data type description for large text fields
+                if data_type in ('VARCHAR2', 'CHAR', 'NVARCHAR2', 'NCHAR'):
+                    type_desc = f"{data_type}({char_length})"
+                elif data_type == 'NUMBER' and data_length:
+                    type_desc = f"{data_type}({data_length})"
+                else:
+                    type_desc = data_type
+                
                 columns.append(DatabaseColumn(
                     name=column_name,
-                    type=data_type,
+                    type=type_desc,
                     nullable=(nullable == 'Y'),
                     isPrimaryKey=False,
                     selected=True
@@ -164,16 +184,16 @@ async def search_oracle_views(
                 
                 # If not found in all_tables, do a full count on the view
                 if not count_result or count_result[0] is None:
-                    # We'll set a timeout to avoid hanging on very large tables
+                    # Set query timeout and enable query rewrite
                     cursor.execute("ALTER SESSION SET QUERY_REWRITE_ENABLED = TRUE")
+                    cursor.execute("ALTER SESSION SET NLS_LENGTH_SEMANTICS = 'CHAR'")
                     
-                    # Set query timeout to 30 seconds (if supported by your Oracle version)
                     try:
                         cursor.execute("BEGIN DBMS_SESSION.SET_STATEMENT_TIMEOUT(30000); END;")
                     except:
                         pass  # Skip if not supported
                     
-                    # Try to get the full count
+                    # Try to get the full count with increased buffer size
                     cursor.execute(f"""
                         SELECT COUNT(*) FROM {schema_name}.{table_name}
                     """)
@@ -184,7 +204,7 @@ async def search_oracle_views(
             except Exception as e:
                 # If counting fails, try a different approach with a sample
                 try:
-                    # Try a simpler count with rownum limit just to get some data
+                    # Try a simpler count with rownum limit
                     cursor.execute(f"""
                         SELECT COUNT(*) FROM (
                             SELECT 1 FROM {schema_name}.{table_name}
@@ -194,17 +214,15 @@ async def search_oracle_views(
                     count_result = cursor.fetchone()
                     if count_result and count_result[0]:
                         row_count = count_result[0]
-                        # If we hit the limit exactly, indicate it might be more
                         if row_count == 1000000:
-                            row_count = 1000000  # Could add a + symbol in the UI if needed
+                            row_count = 1000000
                 except Exception:
-                    # If all else fails, leave as 0
                     pass
             
             tables.append(DatabaseTable(
                 name=table_name,
                 schema=schema_name,
-                rowCount=row_count,  # Using the actual row count
+                rowCount=row_count,
                 columns=columns,
                 selected=False
             ))

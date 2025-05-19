@@ -21,10 +21,22 @@ async def extract_table_chunks(
     cursor = None
     
     try:
-        # Connect to Oracle source database
+        # Set Oracle environment for UTF-8 and increase buffer size
         os.environ["NLS_LANG"] = ".AL32UTF8"
+        
+        # Initialize Oracle client with optimal settings
+        cx_Oracle.init_oracle_client()
+        
+        # Connect to Oracle source database
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
+        
+        # Configure session for large data
+        cursor.execute("ALTER SESSION SET NLS_LENGTH_SEMANTICS = 'CHAR'")
+        cursor.arraysize = 1000  # Fetch 1000 rows at a time
+        
+        # Set large buffer size for CLOB/LONG columns
+        cursor.setinputsizes(None, cx_Oracle.CLOB)
         
         # Get column information
         columns = selected_columns if selected_columns else get_table_columns(cursor, table_name, schema)
@@ -44,7 +56,6 @@ async def extract_table_chunks(
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
         # Extract data in chunks using array fetch
-        cursor.arraysize = 10000  # Fetch 10k rows at a time from Oracle
         cursor.execute(f"SELECT {columns_str} FROM {table_identifier}")
         
         chunk_num = 0
@@ -69,11 +80,13 @@ async def extract_table_chunks(
                     }
                 break
                 
-            # Convert row data to strings, handling None values
+            # Convert row data to strings, handling None values and LOBs
             row_data = []
             for val in row:
                 if val is None:
                     row_data.append('')
+                elif isinstance(val, cx_Oracle.LOB):
+                    row_data.append(val.read())
                 elif isinstance(val, (bytes, bytearray)):
                     row_data.append(val.decode('utf-8', errors='replace'))
                 else:
