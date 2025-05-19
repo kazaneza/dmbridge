@@ -2,6 +2,7 @@ import sqlite3
 from typing import List, Optional
 import pyodbc
 import cx_Oracle
+import os
 from models import DatabaseTable, DatabaseColumn
 
 # Initialize Oracle client once at module level
