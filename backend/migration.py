@@ -40,7 +40,7 @@ async def extract_table_chunks(
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
         # Create temp directory for this table if it doesn't exist
-        table_temp_dir = os.path.join(TEMP_DIR, f"{schema}_{table_name}" if schema else table_name)
+        table_temp_dir = os.path.join(TEMP_DIR, f"T24_{table_name}")
         os.makedirs(table_temp_dir, exist_ok=True)
         
         print(f"Starting extraction for {table_name} ({total_rows} rows)")
@@ -49,6 +49,9 @@ async def extract_table_chunks(
         # Extract data in chunks
         for chunk_num in range(total_chunks):
             offset = chunk_num * chunk_size
+            
+            print(f"Extracting chunk {chunk_num + 1}/{total_chunks} ({offset} to {offset + chunk_size})")
+            
             chunk_data = extract_chunk(
                 cursor, 
                 table_name, 
@@ -105,6 +108,7 @@ async def import_chunk(
         cursor = conn.cursor()
         
         table_name = chunk_info['table_name']
+        chunk_file = chunk_info['file']
         
         # Create table if needed
         if create_table:
@@ -112,12 +116,13 @@ async def import_chunk(
                 table_name, 
                 chunk_info['columns']
             )
-            print(f"Creating table with query: {create_table_query}")
+            print(f"Creating table {table_name}")
+            print(f"Query: {create_table_query}")
             cursor.execute(create_table_query)
         
         # Import data from CSV
         print(f"Importing data from {chunk_file}")
-        with open(chunk_info['file'], 'r', encoding='utf-8') as f:
+        with open(chunk_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             batch = []
             
@@ -139,8 +144,7 @@ async def import_chunk(
         conn.commit()
         print(f"Successfully imported {rows_imported} rows")
         
-        # Don't remove the file yet - keep it for potential retries
-        # Only remove when all chunks are successfully processed
+        # Keep the CSV file for now - only remove after successful migration
         
         return rows_imported
         
@@ -181,7 +185,7 @@ def extract_chunk(
 ) -> List[Dict[str, Any]]:
     """Extract a chunk of data from the table"""
     table_identifier = f"{schema}.{table_name}" if schema else table_name
-    columns_str = ', '.join([f'"{col}"' for col in columns])  # Use double quotes for Oracle identifiers
+    columns_str = ', '.join([f'"{col}"' for col in columns])
     
     if isinstance(cursor, sqlite3.Cursor):
         query = f"""
@@ -189,7 +193,6 @@ def extract_chunk(
             LIMIT {chunk_size} OFFSET {offset}
         """
     elif isinstance(cursor, cx_Oracle.Cursor):
-        # Oracle-specific pagination with bind variables
         query = f"""
             SELECT {columns_str}
             FROM (
@@ -202,15 +205,15 @@ def extract_chunk(
             )
             WHERE rnum > :start_row
         """
-        print(f"Executing query:\n{query}\nwith start_row={offset}, end_row={offset + chunk_size}")
+        print(f"Executing query:\n{query}")
         cursor.execute(query, {'start_row': offset, 'end_row': offset + chunk_size})
     else:
-        # SQL Server
         query = f"""
             SELECT {columns_str} FROM {table_identifier}
             ORDER BY 1
             OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
         """
+        cursor.execute(query)
     
     if not isinstance(cursor, cx_Oracle.Cursor):
         print(f"Executing query:\n{query}")
@@ -221,14 +224,16 @@ def extract_chunk(
 def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, Any]]) -> None:
     """Save chunk data to a CSV file"""
     print(f"Saving {len(data)} rows to {filename}")
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, 'w', newline='', encoding='utf-8') as f:
         writer = csv.DictWriter(f, fieldnames=columns)
         writer.writeheader()
         writer.writerows(data)
+    print(f"Saved chunk to {filename}")
 
 def generate_create_table_query(table_name: str, columns: List[str]) -> str:
-    """Generate CREATE TABLE query with all columns as NVARCHAR(MAX)"""
-    column_defs = [f'"{col}" NVARCHAR2(4000)' for col in columns]  # Use NVARCHAR2(4000) for Oracle
+    """Generate CREATE TABLE query with appropriate column types"""
+    column_defs = [f'"{col}" NVARCHAR2(4000)' for col in columns]
     return f"""
         CREATE TABLE {table_name} (
             {', '.join(column_defs)}
