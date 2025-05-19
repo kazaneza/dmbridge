@@ -8,7 +8,7 @@ import cx_Oracle
 from models import MigrationChunk
 
 TEMP_DIR = mkdtemp()
-CHUNK_SIZE = 1000000  # Extract 1M rows per chunk for faster extraction
+CHUNK_SIZE = 1000000  # Process 1M rows at a time
 
 async def extract_table_chunks(
     connection_string: str,
@@ -43,11 +43,9 @@ async def extract_table_chunks(
         total_rows = cursor.fetchone()[0]
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
-        # Extract all data in one query
-        query = f"SELECT {columns_str} FROM {table_identifier}"
-        print(f"Executing query: {query}")
-        
-        cursor.execute(query)
+        # Extract data in chunks using array fetch
+        cursor.arraysize = 10000  # Fetch 10k rows at a time from Oracle
+        cursor.execute(f"SELECT {columns_str} FROM {table_identifier}")
         
         chunk_num = 0
         rows = []
