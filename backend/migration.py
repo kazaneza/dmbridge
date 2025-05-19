@@ -10,6 +10,14 @@ from models import MigrationChunk
 TEMP_DIR = mkdtemp()
 CHUNK_SIZE = 1000000  # Process 1M rows at a time
 
+# Initialize Oracle client once at module level
+os.environ["NLS_LANG"] = ".AL32UTF8"
+try:
+    cx_Oracle.init_oracle_client()
+except Exception as e:
+    if "Oracle Client library has already been initialized" not in str(e):
+        raise
+
 async def extract_table_chunks(
     connection_string: str,
     table_name: str,
@@ -21,12 +29,6 @@ async def extract_table_chunks(
     cursor = None
     
     try:
-        # Set Oracle environment for UTF-8 and increase buffer size
-        os.environ["NLS_LANG"] = ".AL32UTF8"
-        
-        # Initialize Oracle client with optimal settings
-        cx_Oracle.init_oracle_client()
-        
         # Connect to Oracle source database
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()

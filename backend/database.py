@@ -4,6 +4,14 @@ import pyodbc
 import cx_Oracle
 from models import DatabaseTable, DatabaseColumn
 
+# Initialize Oracle client once at module level
+os.environ["NLS_LANG"] = ".AL32UTF8"
+try:
+    cx_Oracle.init_oracle_client()
+except Exception as e:
+    if "Oracle Client library has already been initialized" not in str(e):
+        raise
+
 async def fetch_mssql_schema(connection_string: str) -> List[DatabaseTable]:
     tables = []
     try:
@@ -95,17 +103,14 @@ async def search_oracle_views(
     cursor = None
     
     try:
-        # Set Oracle environment for UTF-8
-        os.environ["NLS_LANG"] = ".AL32UTF8"
-        
-        # Increase fetch array size
-        cx_Oracle.init_oracle_client()
-        
         conn = cx_Oracle.connect(connection_string)
         cursor = conn.cursor()
         
-        # Set larger buffer size
-        cursor.arraysize = 1000
+        # Configure session for large data
+        cursor.execute("ALTER SESSION SET NLS_LENGTH_SEMANTICS = 'CHAR'")
+        cursor.arraysize = 1000  # Fetch 1000 rows at a time
+        
+        # Set large buffer size for CLOB/LONG columns
         cursor.setinputsizes(None, cx_Oracle.CLOB)
         
         # Build the search condition
