@@ -35,7 +35,7 @@ const Header: React.FC = () => {
         )}
         
         {state.sourceConnection && state.destinationConnection && (
-          <ArrowRight className="mx-2 h-4 w-4 text-blue-400" />
+          <ArrowRight className="mx-2 h-4 w-4 text-blue-400 animate-pulse" />
         )}
         
         {state.destinationConnection && (
@@ -57,9 +57,16 @@ const Header: React.FC = () => {
               <img 
                 src="/src/assets/brand-logo.png" 
                 alt="BK Logo" 
-                className="h-8 w-auto transition-transform duration-300 group-hover:scale-105"
+                className="h-8 w-auto transition-transform duration-300 group-hover:scale-110 animate-float"
               />
-              <span className="ml-2 text-xl font-light opacity-90">DataBridge</span>
+              <div className="ml-3 flex flex-col">
+                <span className="text-xl font-light opacity-90 group-hover:opacity-100 transition-opacity">
+                  DataBridge
+                </span>
+                <span className="text-sm text-blue-200 animate-fade-in">
+                  Enterprise Data Management
+                </span>
+              </div>
             </div>
             <div className="hidden md:block h-6 w-px bg-blue-700/30"></div>
             <span className="hidden md:block text-blue-100 font-medium animate-fade-in">
@@ -70,7 +77,7 @@ const Header: React.FC = () => {
           <div className="flex items-center space-x-6">
             {renderConnectionInfo()}
             <button 
-              className="p-2 rounded-full hover:bg-white/10 transition-colors duration-300"
+              className="p-2 rounded-full hover:bg-white/10 transition-all duration-300 hover:shadow-glow"
               aria-label="Settings"
             >
               <Settings className="h-5 w-5 transition-transform duration-300 hover:rotate-90" />

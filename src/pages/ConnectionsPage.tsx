@@ -15,7 +15,7 @@ const ConnectionsPage: React.FC = () => {
 
   useEffect(() => {
     loadSavedConnections();
-    const timer = setTimeout(() => setIsInitialLoad(false), 1500);
+    const timer = setTimeout(() => setIsInitialLoad(false), 2000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -76,17 +76,26 @@ const ConnectionsPage: React.FC = () => {
   if (isInitialLoad) {
     return (
       <div className="fixed inset-0 bg-gradient-to-r from-blue-900 to-blue-800 flex items-center justify-center">
-        <div className="text-center animate-fade-in">
-          <div className="flex items-center justify-center mb-6">
-            <img 
-              src="/src/assets/brand-logo.png" 
-              alt="BK Logo" 
-              className="h-12 w-auto mr-3 animate-bounce"
-            />
-            <Database className="h-12 w-12 text-white animate-pulse" />
+        <div className="text-center">
+          <div className="flex flex-col items-center justify-center mb-8 animate-fade-in">
+            <div className="flex items-center mb-4">
+              <img 
+                src="/src/assets/brand-logo.png" 
+                alt="BK Logo" 
+                className="h-16 w-auto mr-4 animate-float"
+              />
+              <Database className="h-16 w-16 text-white animate-pulse" />
+            </div>
+            <h1 className="text-3xl font-light text-white mb-3">DataBridge</h1>
+            <p className="text-xl text-blue-200 mb-2 animate-fade-in delay-300">
+              Enterprise Data Management
+            </p>
+            <div className="flex items-center space-x-2 animate-fade-in delay-500">
+              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-0"></div>
+              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-150"></div>
+              <div className="w-2 h-2 bg-blue-400 rounded-full animate-bounce delay-300"></div>
+            </div>
           </div>
-          <h1 className="text-2xl font-light text-white mb-2">DataBridge</h1>
-          <p className="text-blue-200">Initializing your data management solution...</p>
         </div>
       </div>
     );
@@ -128,7 +137,7 @@ const ConnectionsPage: React.FC = () => {
           <p className="text-gray-500 mb-6">Add your first database connection to start migrating data.</p>
           <button
             onClick={() => setShowAddForm(true)}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300"
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-300 hover:shadow-lg"
           >
             <PlusCircle className="mr-2 h-5 w-5" />
             Add Database Connection
@@ -151,7 +160,7 @@ const ConnectionsPage: React.FC = () => {
             </button>
             <button
               onClick={() => setShowAddForm(true)}
-              className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300"
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-300 hover:shadow-lg"
             >
               <PlusCircle className="mr-1.5 h-4 w-4" />
               Add Connection
