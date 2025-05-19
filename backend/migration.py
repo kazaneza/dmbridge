@@ -8,7 +8,7 @@ import cx_Oracle
 from models import MigrationChunk
 
 TEMP_DIR = mkdtemp()
-CHUNK_SIZE = 1000  # Process 1k rows at a time for better stability
+CHUNK_SIZE = 1000000  # Extract 1M rows per chunk for faster extraction
 
 async def extract_table_chunks(
     connection_string: str,
@@ -43,7 +43,7 @@ async def extract_table_chunks(
         total_rows = cursor.fetchone()[0]
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
-        # Simple query to get all data
+        # Extract all data in one query
         query = f"SELECT {columns_str} FROM {table_identifier}"
         print(f"Executing query: {query}")
         
@@ -159,8 +159,8 @@ async def import_chunk(
                 batch.append(row_values)
                 rows_imported += 1
                 
-                # Execute in smaller batches for better performance
-                if len(batch) >= 100:  # Reduced batch size
+                # Execute in larger batches for better performance
+                if len(batch) >= 10000:  # Increased batch size
                     columns_str = ','.join([f'[{col}]' for col in chunk_info['columns']])
                     placeholders = ','.join(['?' for _ in chunk_info['columns']])
                     query = f"""
