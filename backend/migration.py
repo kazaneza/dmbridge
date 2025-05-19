@@ -38,6 +38,11 @@ async def extract_table_chunks(
         print(f"Starting extraction for {table_name}")
         print(f"Temp directory: {table_temp_dir}")
         
+        # Get total row count first
+        cursor.execute(f"SELECT COUNT(*) FROM {table_identifier}")
+        total_rows = cursor.fetchone()[0]
+        total_chunks = (total_rows + chunk_size - 1) // chunk_size
+        
         # Simple query to get all data
         query = f"SELECT {columns_str} FROM {table_identifier}"
         print(f"Executing query: {query}")
@@ -58,10 +63,11 @@ async def extract_table_chunks(
                     yield {
                         'file': chunk_file,
                         'chunk_number': chunk_num,
-                        'total_chunks': chunk_num + 1,
+                        'total_chunks': total_chunks,
                         'columns': columns,
                         'table_name': table_name,
-                        'schema': schema
+                        'schema': schema,
+                        'total_rows': total_rows
                     }
                 break
                 
@@ -85,10 +91,11 @@ async def extract_table_chunks(
                 yield {
                     'file': chunk_file,
                     'chunk_number': chunk_num,
-                    'total_chunks': -1,  # Will be updated at end
+                    'total_chunks': total_chunks,
                     'columns': columns,
                     'table_name': table_name,
-                    'schema': schema
+                    'schema': schema,
+                    'total_rows': total_rows
                 }
                 
                 # Reset for next chunk
@@ -115,7 +122,7 @@ async def import_chunk(
     rows_imported = 0
     
     try:
-        # Connect to SQL Server
+        # Connect to SQL Server with fast load enabled
         conn = pyodbc.connect(connection_string, autocommit=False)
         cursor = conn.cursor()
         
@@ -136,7 +143,7 @@ async def import_chunk(
             """)
             conn.commit()
         
-        # Import data from CSV
+        # Import data from CSV using fast load
         print(f"Importing data from {chunk_file}")
         with open(chunk_file, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
@@ -152,14 +159,15 @@ async def import_chunk(
                 batch.append(row_values)
                 rows_imported += 1
                 
-                # Execute in batches
-                if len(batch) >= 1000:  # Smaller batch size for better performance
+                # Execute in smaller batches for better performance
+                if len(batch) >= 100:  # Reduced batch size
                     columns_str = ','.join([f'[{col}]' for col in chunk_info['columns']])
                     placeholders = ','.join(['?' for _ in chunk_info['columns']])
                     query = f"""
                         INSERT INTO {table_name} ({columns_str})
                         VALUES ({placeholders})
                     """
+                    cursor.fast_executemany = True  # Enable fast load
                     cursor.executemany(query, batch)
                     print(f"Imported {rows_imported} rows")
                     batch = []
@@ -173,6 +181,7 @@ async def import_chunk(
                     INSERT INTO {table_name} ({columns_str})
                     VALUES ({placeholders})
                 """
+                cursor.fast_executemany = True  # Enable fast load
                 cursor.executemany(query, batch)
                 print(f"Imported final {len(batch)} rows")
                 conn.commit()
