@@ -49,13 +49,16 @@ const Header: React.FC = () => {
   };
 
   return (
-    <header className="bg-gradient-to-r from-blue-900 to-teal-800 text-white shadow-md">
-      <div className="container mx-auto px-4 py-3">
+    <header className="bg-gradient-to-r from-blue-900 to-blue-800 text-white shadow-lg">
+      <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-4">
-            <h1 className="text-xl font-bold">DataBridge</h1>
-            <div className="hidden md:block h-6 w-px bg-teal-500/30"></div>
-            <span className="hidden md:block text-teal-100 font-medium">
+          <div className="flex items-center space-x-6">
+            <div className="flex items-center">
+              <span className="text-2xl font-bold tracking-tight">BK</span>
+              <span className="ml-2 text-xl font-light">DataBridge</span>
+            </div>
+            <div className="hidden md:block h-6 w-px bg-blue-700/30"></div>
+            <span className="hidden md:block text-blue-100 font-medium">
               {getStepLabel()}
             </span>
           </div>
