@@ -187,3 +187,5 @@ const ConnectionsPage: React.FC = () => {
 };
 
 export default ConnectionsPage;
+
+export default ConnectionsPage
