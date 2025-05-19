@@ -35,10 +35,8 @@ async def extract_table_chunks(
         
         # Configure session for large data
         cursor.execute("ALTER SESSION SET NLS_LENGTH_SEMANTICS = 'CHAR'")
+        cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'")
         cursor.arraysize = 1000  # Fetch 1000 rows at a time
-        
-        # Set large buffer size for CLOB/LONG columns
-        cursor.setinputsizes(None, cx_Oracle.CLOB)
         
         # Get column information
         columns = selected_columns if selected_columns else get_table_columns(cursor, table_name, schema)
@@ -57,50 +55,54 @@ async def extract_table_chunks(
         total_rows = cursor.fetchone()[0]
         total_chunks = (total_rows + chunk_size - 1) // chunk_size
         
-        # Extract data in chunks using array fetch
-        cursor.execute(f"SELECT {columns_str} FROM {table_identifier}")
-        
+        # Extract data in chunks
+        offset = 0
         chunk_num = 0
-        rows = []
         
-        while True:
-            row = cursor.fetchone()
-            if not row:
-                if rows:  # Save last chunk
-                    chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
-                    chunk_data = [dict(zip(columns, row_data)) for row_data in rows]
-                    save_chunk_to_csv(chunk_file, columns, chunk_data)
-                    print(f"Saved final chunk {chunk_num} with {len(rows)} rows")
-                    yield {
-                        'file': chunk_file,
-                        'chunk_number': chunk_num,
-                        'total_chunks': total_chunks,
-                        'columns': columns,
-                        'table_name': table_name,
-                        'schema': schema,
-                        'total_rows': total_rows
-                    }
-                break
+        while offset < total_rows:
+            # Use ROWNUM for pagination instead of bind variables
+            query = f"""
+                SELECT {columns_str}
+                FROM (
+                    SELECT a.*, ROWNUM rnum
+                    FROM (
+                        SELECT {columns_str}
+                        FROM {table_identifier}
+                        ORDER BY 1
+                    ) a
+                    WHERE ROWNUM <= {offset + chunk_size}
+                )
+                WHERE rnum > {offset}
+            """
+            
+            cursor.execute(query)
+            
+            rows = []
+            while True:
+                row = cursor.fetchone()
+                if not row:
+                    break
                 
-            # Convert row data to strings, handling None values and LOBs
-            row_data = []
-            for val in row:
-                if val is None:
-                    row_data.append('')
-                elif isinstance(val, cx_Oracle.LOB):
-                    row_data.append(val.read())
-                elif isinstance(val, (bytes, bytearray)):
-                    row_data.append(val.decode('utf-8', errors='replace'))
-                else:
-                    row_data.append(str(val))
+                # Convert row data to strings, handling None values and LOBs
+                row_data = []
+                for val in row:
+                    if val is None:
+                        row_data.append('')
+                    elif isinstance(val, cx_Oracle.LOB):
+                        row_data.append(val.read())
+                    elif isinstance(val, (bytes, bytearray)):
+                        row_data.append(val.decode('utf-8', errors='replace'))
+                    else:
+                        row_data.append(str(val))
+                
+                rows.append(row_data)
             
-            rows.append(row_data)
-            
-            if len(rows) >= chunk_size:
+            if rows:
                 chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
                 chunk_data = [dict(zip(columns, row_data)) for row_data in rows]
                 save_chunk_to_csv(chunk_file, columns, chunk_data)
                 print(f"Saved chunk {chunk_num} with {len(rows)} rows")
+                
                 yield {
                     'file': chunk_file,
                     'chunk_number': chunk_num,
@@ -111,10 +113,10 @@ async def extract_table_chunks(
                     'total_rows': total_rows
                 }
                 
-                # Reset for next chunk
-                rows = []
                 chunk_num += 1
-                
+            
+            offset += chunk_size
+            
     except Exception as e:
         print(f"Error during extraction: {str(e)}")
         raise Exception(f"Error extracting data: {str(e)}")
