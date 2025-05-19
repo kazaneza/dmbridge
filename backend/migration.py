@@ -65,8 +65,8 @@ async def extract_table_chunks(
                 'total_chunks': total_chunks,
                 'columns': columns,
                 'total_rows': total_rows,
-                'table_name': table_name,  # Add table_name to the chunk info
-                'schema': schema  # Add schema to the chunk info
+                'table_name': table_name,
+                'schema': schema
             }
             
     except Exception as e:
@@ -99,7 +99,7 @@ async def import_chunk(
         
         cursor = conn.cursor()
         
-        table_name = chunk_info['table_name']  # Get table_name from chunk_info
+        table_name = chunk_info['table_name']
         
         # Create table if needed
         if create_table:
@@ -171,16 +171,32 @@ def extract_chunk(
 ) -> List[Dict[str, Any]]:
     """Extract a chunk of data from the table"""
     table_identifier = f"{schema}.{table_name}" if schema else table_name
-    columns_str = ', '.join([f"[{col}]" for col in columns])
+    columns_str = ', '.join([f'"{col}"' for col in columns])  # Use double quotes for Oracle identifiers
     
     if isinstance(cursor, sqlite3.Cursor):
         query = f"""
             SELECT {columns_str} FROM {table_identifier}
             LIMIT {chunk_size} OFFSET {offset}
         """
+    elif isinstance(cursor, cx_Oracle.Cursor):
+        # Oracle-specific pagination
+        query = f"""
+            SELECT {columns_str}
+            FROM (
+                SELECT a.*, ROWNUM rnum
+                FROM (
+                    SELECT {columns_str}
+                    FROM {table_identifier}
+                    ORDER BY 1
+                ) a WHERE ROWNUM <= {offset + chunk_size}
+            )
+            WHERE rnum > {offset}
+        """
     else:
+        # SQL Server
         query = f"""
             SELECT {columns_str} FROM {table_identifier}
+            ORDER BY 1
             OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
         """
     
@@ -196,7 +212,7 @@ def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, An
 
 def generate_create_table_query(table_name: str, columns: List[str]) -> str:
     """Generate CREATE TABLE query with all columns as NVARCHAR(MAX)"""
-    column_defs = [f"[{col}] NVARCHAR(MAX)" for col in columns]
+    column_defs = [f'"{col}" NVARCHAR2(4000)' for col in columns]  # Use NVARCHAR2(4000) for Oracle
     return f"""
         CREATE TABLE {table_name} (
             {', '.join(column_defs)}
@@ -207,7 +223,7 @@ def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[A
     """Import a batch of rows"""
     placeholders = ','.join(['?' for _ in columns])
     query = f"""
-        INSERT INTO {table_name} ({','.join([f'[{col}]' for col in columns])})
+        INSERT INTO {table_name} ({','.join([f'"{col}"' for col in columns])})
         VALUES ({placeholders})
     """
     cursor.executemany(query, batch)
