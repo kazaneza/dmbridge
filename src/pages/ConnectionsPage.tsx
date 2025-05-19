@@ -77,16 +77,16 @@ const ConnectionsPage: React.FC = () => {
     return (
       <div className="fixed inset-0 bg-gradient-to-r from-blue-900 to-blue-800 flex items-center justify-center">
         <div className="text-center">
-          <div className="flex flex-col items-center justify-center mb-8 animate-fade-in">
+          <div className="flex flex-col items-center justify-center mb-8">
             <div className="flex items-center mb-4">
               <img 
                 src="/src/assets/brand-logo.png" 
                 alt="BK Logo" 
-                className="h-16 w-auto mr-4 animate-float"
+                className="h-16 w-auto mr-4 animate-bounce-custom"
               />
               <Database className="h-16 w-16 text-white animate-pulse" />
             </div>
-            <h1 className="text-3xl font-light text-white mb-3">DataBridge</h1>
+            <h1 className="text-3xl font-light text-white mb-3 animate-fade-in">DataBridge</h1>
             <p className="text-xl text-blue-200 mb-2 animate-fade-in delay-300">
               Data Management
             </p>
