@@ -35,7 +35,7 @@ const Header: React.FC = () => {
         )}
         
         {state.sourceConnection && state.destinationConnection && (
-          <ArrowRight className="mx-2 h-4 w-4 text-gray-400" />
+          <ArrowRight className="mx-2 h-4 w-4 text-blue-400" />
         )}
         
         {state.destinationConnection && (
@@ -53,12 +53,12 @@ const Header: React.FC = () => {
       <div className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-6">
-            <div className="flex items-center">
-              <span className="text-2xl font-bold tracking-tight">BK</span>
-              <span className="ml-2 text-xl font-light">DataBridge</span>
+            <div className="flex items-center group">
+              <span className="text-2xl font-bold tracking-tight transition-transform duration-300 group-hover:scale-105">BK</span>
+              <span className="ml-2 text-xl font-light opacity-90">DataBridge</span>
             </div>
             <div className="hidden md:block h-6 w-px bg-blue-700/30"></div>
-            <span className="hidden md:block text-blue-100 font-medium">
+            <span className="hidden md:block text-blue-100 font-medium animate-fade-in">
               {getStepLabel()}
             </span>
           </div>
@@ -66,10 +66,10 @@ const Header: React.FC = () => {
           <div className="flex items-center space-x-6">
             {renderConnectionInfo()}
             <button 
-              className="p-2 rounded-full hover:bg-white/10 transition-colors"
+              className="p-2 rounded-full hover:bg-white/10 transition-colors duration-300"
               aria-label="Settings"
             >
-              <Settings className="h-5 w-5" />
+              <Settings className="h-5 w-5 transition-transform duration-300 hover:rotate-90" />
             </button>
           </div>
         </div>

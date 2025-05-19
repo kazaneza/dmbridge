@@ -38,7 +38,6 @@ const ConnectionsPage: React.FC = () => {
       setShowAddForm(false);
     } catch (error) {
       console.error('Failed to save connection:', error);
-      // You might want to show an error message to the user here
     }
   };
 
@@ -48,7 +47,6 @@ const ConnectionsPage: React.FC = () => {
   };
 
   const handleDeleteConnection = (connection: DatabaseConnection) => {
-    // If the connection is the source or destination, clear it
     if (state.sourceConnection?.id === connection.id) {
       dispatch({ type: 'SET_SOURCE_CONNECTION', payload: null });
     }
@@ -62,7 +60,6 @@ const ConnectionsPage: React.FC = () => {
   const handleSetSource = (connection: DatabaseConnection | null) => {
     dispatch({ type: 'SET_SOURCE_CONNECTION', payload: connection });
     
-    // If both connections are set, move to the next step
     if (connection && state.destinationConnection) {
       dispatch({ type: 'SET_CURRENT_STEP', payload: 'tables' });
     }
@@ -71,7 +68,6 @@ const ConnectionsPage: React.FC = () => {
   const handleSetDestination = (connection: DatabaseConnection | null) => {
     dispatch({ type: 'SET_DESTINATION_CONNECTION', payload: connection });
     
-    // If both connections are set, move to the next step
     if (connection && state.sourceConnection) {
       dispatch({ type: 'SET_CURRENT_STEP', payload: 'tables' });
     }
@@ -80,8 +76,8 @@ const ConnectionsPage: React.FC = () => {
   if (isInitialLoad) {
     return (
       <div className="fixed inset-0 bg-gradient-to-r from-blue-900 to-blue-800 flex items-center justify-center">
-        <div className="text-center">
-          <div className="flex items-center justify-center mb-6">
+        <div className="text-center animate-fade-in">
+          <div className="flex items-center justify-center mb-6 animate-bounce">
             <span className="text-4xl font-bold text-white mr-3">BK</span>
             <Database className="h-12 w-12 text-white animate-pulse" />
           </div>
@@ -115,7 +111,7 @@ const ConnectionsPage: React.FC = () => {
     if (isLoading) {
       return (
         <div className="flex justify-center items-center py-12">
-          <RefreshCw className="animate-spin h-8 w-8 text-teal-600 mr-3" />
+          <RefreshCw className="animate-spin h-8 w-8 text-blue-600 mr-3" />
           <span className="text-lg font-medium text-gray-700">Loading connections...</span>
         </div>
       );
@@ -128,7 +124,7 @@ const ConnectionsPage: React.FC = () => {
           <p className="text-gray-500 mb-6">Add your first database connection to start migrating data.</p>
           <button
             onClick={() => setShowAddForm(true)}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300"
           >
             <PlusCircle className="mr-2 h-5 w-5" />
             Add Database Connection
@@ -144,14 +140,14 @@ const ConnectionsPage: React.FC = () => {
           <div className="flex space-x-4">
             <button
               onClick={loadSavedConnections}
-              className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
+              className="inline-flex items-center px-3 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-300"
             >
-              <RefreshCw className="mr-1.5 h-4 w-4" />
+              <RefreshCw className={`mr-1.5 h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
             <button
               onClick={() => setShowAddForm(true)}
-              className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
+              className="inline-flex items-center px-3 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-300"
             >
               <PlusCircle className="mr-1.5 h-4 w-4" />
               Add Connection
