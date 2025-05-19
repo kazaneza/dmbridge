@@ -4,11 +4,11 @@ export default {
   theme: {
     extend: {
       animation: {
-        'fade-in': 'fadeIn 0.5s ease-out',
-        'slide-up': 'slideUp 0.5s ease-out',
-        'bounce': 'bounce 1s infinite',
-        'float': 'float 3s ease-in-out infinite',
-        'pulse': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'fade-in': 'fadeIn 1s ease-out',
+        'slide-up': 'slideUp 1s ease-out',
+        'bounce': 'bounce 2s infinite',
+        'float': 'float 6s ease-in-out infinite',
+        'pulse': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       },
       keyframes: {
         fadeIn: {

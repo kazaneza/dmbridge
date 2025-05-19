@@ -57,14 +57,14 @@ const Header: React.FC = () => {
               <img 
                 src="/src/assets/brand-logo.png" 
                 alt="BK Logo" 
-                className="h-8 w-auto transition-transform duration-300 group-hover:scale-110 animate-float"
+                className="h-8 w-auto transition-transform duration-500 group-hover:scale-110 animate-float"
               />
               <div className="ml-3 flex flex-col">
-                <span className="text-xl font-light opacity-90 group-hover:opacity-100 transition-opacity">
+                <span className="text-xl font-light opacity-90 group-hover:opacity-100 transition-opacity duration-500">
                   DataBridge
                 </span>
                 <span className="text-sm text-blue-200 animate-fade-in">
-                  Enterprise Data Management
+                  Data Management
                 </span>
               </div>
             </div>
@@ -77,10 +77,10 @@ const Header: React.FC = () => {
           <div className="flex items-center space-x-6">
             {renderConnectionInfo()}
             <button 
-              className="p-2 rounded-full hover:bg-white/10 transition-all duration-300 hover:shadow-glow"
+              className="p-2 rounded-full hover:bg-white/10 transition-all duration-500 hover:shadow-glow"
               aria-label="Settings"
             >
-              <Settings className="h-5 w-5 transition-transform duration-300 hover:rotate-90" />
+              <Settings className="h-5 w-5 transition-transform duration-500 hover:rotate-90" />
             </button>
           </div>
         </div>
