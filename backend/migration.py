@@ -116,7 +116,7 @@ async def import_chunk(
             cursor.execute(create_table_query)
         
         # Import data from CSV
-        print(f"Importing data from {chunk_info['file']}")
+        print(f"Importing data from {chunk_file}")
         with open(chunk_info['file'], 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             batch = []
@@ -189,7 +189,7 @@ def extract_chunk(
             LIMIT {chunk_size} OFFSET {offset}
         """
     elif isinstance(cursor, cx_Oracle.Cursor):
-        # Oracle-specific pagination
+        # Oracle-specific pagination with bind variables
         query = f"""
             SELECT {columns_str}
             FROM (
@@ -198,10 +198,12 @@ def extract_chunk(
                     SELECT {columns_str}
                     FROM {table_identifier}
                     ORDER BY 1
-                ) a WHERE ROWNUM <= {offset + chunk_size}
+                ) a WHERE ROWNUM <= :end_row
             )
-            WHERE rnum > {offset}
+            WHERE rnum > :start_row
         """
+        print(f"Executing query:\n{query}\nwith start_row={offset}, end_row={offset + chunk_size}")
+        cursor.execute(query, {'start_row': offset, 'end_row': offset + chunk_size})
     else:
         # SQL Server
         query = f"""
@@ -210,8 +212,10 @@ def extract_chunk(
             OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
         """
     
-    print(f"Executing query: {query}")
-    cursor.execute(query)
+    if not isinstance(cursor, cx_Oracle.Cursor):
+        print(f"Executing query:\n{query}")
+        cursor.execute(query)
+    
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
 
 def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, Any]]) -> None:
