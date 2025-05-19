@@ -46,64 +46,33 @@ async def extract_table_chunks(
         print(f"Starting extraction for {table_name} ({total_rows} rows)")
         print(f"Temp directory: {table_temp_dir}")
         
-        # Extract first chunk to test insertion
-        print("Extracting first chunk for testing...")
-        
-        # For Oracle, use a simpler query for the first chunk
+        # For Oracle, use a simpler approach with ROWNUM
         if isinstance(cursor, cx_Oracle.Cursor):
             columns_str = ', '.join([f'"{col}"' for col in columns])
             table_identifier = f"{schema}.{table_name}" if schema else table_name
-            query = f"""
-                SELECT {columns_str}
-                FROM {table_identifier}
-                WHERE ROWNUM <= :chunk_size
-            """
-            print(f"Executing query:\n{query}")
-            cursor.execute(query, {'chunk_size': min(chunk_size, total_rows)})
-            rows = cursor.fetchall()
-            first_chunk = [dict(zip(columns, row)) for row in rows]
-        else:
-            first_chunk = extract_chunk(cursor, table_name, schema, columns, 0, min(chunk_size, total_rows))
-        
-        if not first_chunk:
-            raise Exception("Failed to extract first chunk - no data returned")
             
-        # Save first chunk to CSV
-        first_chunk_file = os.path.join(table_temp_dir, "chunk_0.csv")
-        save_chunk_to_csv(first_chunk_file, columns, first_chunk)
-        print(f"First chunk saved to {first_chunk_file}")
-        
-        # Yield first chunk for testing
-        yield {
-            'file': first_chunk_file,
-            'chunk_number': 0,
-            'total_chunks': total_chunks,
-            'columns': columns,
-            'table_name': table_name,
-            'schema': schema,
-            'is_test_chunk': True
-        }
-        
-        # If first chunk succeeds, extract remaining chunks
-        if isinstance(cursor, cx_Oracle.Cursor):
-            # For Oracle, use a different pagination approach
-            for chunk_num in range(1, total_chunks):
-                start_row = chunk_num * chunk_size
+            for chunk_num in range(total_chunks):
+                start_row = chunk_num * chunk_size + 1
                 end_row = min((chunk_num + 1) * chunk_size, total_rows)
                 
-                print(f"Processing chunk {chunk_num}/{total_chunks} (rows {start_row} to {end_row})")
+                print(f"Processing chunk {chunk_num + 1}/{total_chunks} (rows {start_row} to {end_row})")
                 
                 query = f"""
                     SELECT {columns_str}
-                    FROM {table_identifier}
-                    WHERE ROWNUM <= :end_row
-                    MINUS
-                    SELECT {columns_str}
-                    FROM {table_identifier}
-                    WHERE ROWNUM <= :start_row
+                    FROM (
+                        SELECT a.*, ROWNUM rnum
+                        FROM (
+                            SELECT {columns_str}
+                            FROM {table_identifier}
+                            ORDER BY 1
+                        ) a WHERE ROWNUM <= {end_row}
+                    )
+                    WHERE rnum >= {start_row}
                 """
+                
                 print(f"Executing query:\n{query}")
-                cursor.execute(query, {'start_row': start_row, 'end_row': end_row})
+                cursor.execute(query)
+                
                 rows = cursor.fetchall()
                 chunk_data = [dict(zip(columns, row)) for row in rows]
                 
@@ -118,13 +87,12 @@ async def extract_table_chunks(
                     'columns': columns,
                     'table_name': table_name,
                     'schema': schema,
-                    'is_test_chunk': False
+                    'is_test_chunk': chunk_num == 0
                 }
         else:
-            for chunk_num in range(1, total_chunks):
+            # For other databases, use existing logic
+            for chunk_num in range(total_chunks):
                 offset = chunk_num * chunk_size
-                print(f"Processing chunk {chunk_num}/{total_chunks} (rows {offset} to {min(offset + chunk_size, total_rows)})")
-                
                 chunk_data = extract_chunk(
                     cursor, 
                     table_name, 
@@ -145,7 +113,7 @@ async def extract_table_chunks(
                     'columns': columns,
                     'table_name': table_name,
                     'schema': schema,
-                    'is_test_chunk': False
+                    'is_test_chunk': chunk_num == 0
                 }
             
     except Exception as e:
@@ -215,10 +183,9 @@ async def import_chunk(
         conn.commit()
         print(f"Successfully imported {rows_imported} rows")
         
-        # Only remove test chunk file
-        if chunk_info.get('is_test_chunk'):
-            os.remove(chunk_file)
-            print(f"Removed test chunk file {chunk_file}")
+        # Clean up CSV file after successful import
+        os.remove(chunk_file)
+        print(f"Removed chunk file {chunk_file}")
         
         return rows_imported
         
