@@ -8,7 +8,7 @@ import cx_Oracle
 from models import MigrationChunk
 
 TEMP_DIR = mkdtemp()
-CHUNK_SIZE = 100000  # Process 100k rows at a time
+CHUNK_SIZE = 1000000  # Process 1M rows at a time
 
 async def extract_table_chunks(
     connection_string: str,
@@ -34,88 +34,61 @@ async def extract_table_chunks(
         
         # Get column information
         columns = selected_columns if selected_columns else get_table_columns(cursor, table_name, schema)
-        
-        # Calculate total rows and chunks
-        total_rows = get_row_count(cursor, table_name, schema)
-        total_chunks = (total_rows + chunk_size - 1) // chunk_size
+        columns_str = ', '.join([f'"{col}"' for col in columns])
+        table_identifier = f"{schema}.{table_name}" if schema else table_name
         
         # Create temp directory for this table
-        table_temp_dir = os.path.join(TEMP_DIR, f"T24_{table_name}")
+        table_temp_dir = os.path.join(TEMP_DIR, f"{table_name}")
         os.makedirs(table_temp_dir, exist_ok=True)
         
-        print(f"Starting extraction for {table_name} ({total_rows} rows)")
+        print(f"Starting extraction for {table_name}")
         print(f"Temp directory: {table_temp_dir}")
         
-        # For Oracle, use a simpler approach with ROWNUM
-        if isinstance(cursor, cx_Oracle.Cursor):
-            columns_str = ', '.join([f'"{col}"' for col in columns])
-            table_identifier = f"{schema}.{table_name}" if schema else table_name
+        # Simple query to get all data
+        query = f"SELECT {columns_str} FROM {table_identifier}"
+        print(f"Executing query: {query}")
+        
+        cursor.execute(query)
+        
+        chunk_num = 0
+        rows = []
+        chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
+        
+        while True:
+            row = cursor.fetchone()
+            if not row:
+                if rows:  # Save last chunk
+                    chunk_data = [dict(zip(columns, r)) for r in rows]
+                    save_chunk_to_csv(chunk_file, columns, chunk_data)
+                    yield {
+                        'file': chunk_file,
+                        'chunk_number': chunk_num,
+                        'total_chunks': chunk_num + 1,
+                        'columns': columns,
+                        'table_name': table_name,
+                        'schema': schema
+                    }
+                break
+                
+            rows.append(row)
             
-            for chunk_num in range(total_chunks):
-                start_row = chunk_num * chunk_size + 1
-                end_row = min((chunk_num + 1) * chunk_size, total_rows)
-                
-                print(f"Processing chunk {chunk_num + 1}/{total_chunks} (rows {start_row} to {end_row})")
-                
-                query = f"""
-                    SELECT {columns_str}
-                    FROM (
-                        SELECT a.*, ROWNUM rnum
-                        FROM (
-                            SELECT {columns_str}
-                            FROM {table_identifier}
-                            ORDER BY 1
-                        ) a WHERE ROWNUM <= {end_row}
-                    )
-                    WHERE rnum >= {start_row}
-                """
-                
-                print(f"Executing query:\n{query}")
-                cursor.execute(query)
-                
-                rows = cursor.fetchall()
-                chunk_data = [dict(zip(columns, row)) for row in rows]
-                
-                # Save chunk to CSV
-                chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
+            if len(rows) >= chunk_size:
+                chunk_data = [dict(zip(columns, r)) for r in rows]
                 save_chunk_to_csv(chunk_file, columns, chunk_data)
-                
                 yield {
                     'file': chunk_file,
                     'chunk_number': chunk_num,
-                    'total_chunks': total_chunks,
+                    'total_chunks': -1,  # Will be updated at end
                     'columns': columns,
                     'table_name': table_name,
-                    'schema': schema,
-                    'is_test_chunk': chunk_num == 0
+                    'schema': schema
                 }
-        else:
-            # For other databases, use existing logic
-            for chunk_num in range(total_chunks):
-                offset = chunk_num * chunk_size
-                chunk_data = extract_chunk(
-                    cursor, 
-                    table_name, 
-                    schema, 
-                    columns, 
-                    offset, 
-                    chunk_size
-                )
                 
-                # Save chunk to CSV
+                # Reset for next chunk
+                rows = []
+                chunk_num += 1
                 chunk_file = os.path.join(table_temp_dir, f"chunk_{chunk_num}.csv")
-                save_chunk_to_csv(chunk_file, columns, chunk_data)
                 
-                yield {
-                    'file': chunk_file,
-                    'chunk_number': chunk_num,
-                    'total_chunks': total_chunks,
-                    'columns': columns,
-                    'table_name': table_name,
-                    'schema': schema,
-                    'is_test_chunk': chunk_num == 0
-                }
-            
     except Exception as e:
         raise Exception(f"Error extracting data: {str(e)}")
         
@@ -209,43 +182,6 @@ def get_table_columns(cursor, table_name: str, schema: Optional[str] = None) -> 
         table_identifier = f"{schema}.{table_name}" if schema else table_name
         cursor.execute(f"SELECT * FROM {table_identifier} WHERE 1=0")
         return [desc[0] for desc in cursor.description]
-
-def get_row_count(cursor, table_name: str, schema: Optional[str] = None) -> int:
-    """Get total number of rows in the table"""
-    table_identifier = f"{schema}.{table_name}" if schema else table_name
-    cursor.execute(f"SELECT COUNT(*) FROM {table_identifier}")
-    return cursor.fetchone()[0]
-
-def extract_chunk(
-    cursor,
-    table_name: str,
-    schema: Optional[str],
-    columns: List[str],
-    offset: int,
-    chunk_size: int
-) -> List[Dict[str, Any]]:
-    """Extract a chunk of data from the table"""
-    table_identifier = f"{schema}.{table_name}" if schema else table_name
-    columns_str = ', '.join([f'"{col}"' for col in columns])
-    
-    if isinstance(cursor, sqlite3.Cursor):
-        query = f"""
-            SELECT {columns_str} FROM {table_identifier}
-            LIMIT {chunk_size} OFFSET {offset}
-        """
-    else:
-        query = f"""
-            SELECT {columns_str} FROM {table_identifier}
-            ORDER BY 1
-            OFFSET {offset} ROWS FETCH NEXT {chunk_size} ROWS ONLY
-        """
-    
-    print(f"Executing query:\n{query}")
-    cursor.execute(query)
-    
-    rows = cursor.fetchall()
-    print(f"Fetched {len(rows)} rows")
-    return [dict(zip(columns, row)) for row in rows]
 
 def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, Any]]) -> None:
     """Save chunk data to a CSV file"""
