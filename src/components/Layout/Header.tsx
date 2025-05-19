@@ -54,7 +54,11 @@ const Header: React.FC = () => {
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-6">
             <div className="flex items-center group">
-              <span className="text-2xl font-bold tracking-tight transition-transform duration-300 group-hover:scale-105">BK</span>
+              <img 
+                src="/src/assets/brand-logo.png" 
+                alt="BK Logo" 
+                className="h-8 w-auto transition-transform duration-300 group-hover:scale-105"
+              />
               <span className="ml-2 text-xl font-light opacity-90">DataBridge</span>
             </div>
             <div className="hidden md:block h-6 w-px bg-blue-700/30"></div>

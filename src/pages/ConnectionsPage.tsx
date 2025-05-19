@@ -77,8 +77,12 @@ const ConnectionsPage: React.FC = () => {
     return (
       <div className="fixed inset-0 bg-gradient-to-r from-blue-900 to-blue-800 flex items-center justify-center">
         <div className="text-center animate-fade-in">
-          <div className="flex items-center justify-center mb-6 animate-bounce">
-            <span className="text-4xl font-bold text-white mr-3">BK</span>
+          <div className="flex items-center justify-center mb-6">
+            <img 
+              src="/src/assets/brand-logo.png" 
+              alt="BK Logo" 
+              className="h-12 w-auto mr-3 animate-bounce"
+            />
             <Database className="h-12 w-12 text-white animate-pulse" />
           </div>
           <h1 className="text-2xl font-light text-white mb-2">DataBridge</h1>
