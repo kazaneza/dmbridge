@@ -1,3 +1,4 @@
+```python
 import csv
 import os
 from tempfile import mkdtemp
@@ -123,14 +124,15 @@ async def import_chunk(
     rows_imported = 0
     
     try:
-        # Connect to destination database
+        # Connect to destination database based on connection string type
+        is_sqlserver = 'ODBC Driver' in connection_string
+        
         if '.db' in connection_string:
             conn = sqlite3.connect(connection_string)
+        elif is_sqlserver:
+            conn = pyodbc.connect(connection_string)
         else:
-            if 'ODBC Driver' in connection_string:
-                conn = pyodbc.connect(connection_string)
-            else:
-                conn = cx_Oracle.connect(connection_string)
+            conn = cx_Oracle.connect(connection_string)
         
         cursor = conn.cursor()
         
@@ -142,11 +144,12 @@ async def import_chunk(
             create_table_query = generate_create_table_query(
                 table_name, 
                 chunk_info['columns'],
-                'ODBC Driver' in connection_string  # Is SQL Server?
+                is_sqlserver
             )
             print(f"Creating table {table_name}")
             print(f"Query: {create_table_query}")
             cursor.execute(create_table_query)
+            conn.commit()
         
         # Import data from CSV
         print(f"Importing data from {chunk_file}")
@@ -155,7 +158,16 @@ async def import_chunk(
             batch = []
             
             for row in reader:
-                batch.append([row[col] for col in chunk_info['columns']])
+                # Handle empty strings as NULL for SQL Server
+                if is_sqlserver:
+                    row_values = [
+                        None if val == '' else val 
+                        for val in [row[col] for col in chunk_info['columns']]
+                    ]
+                else:
+                    row_values = [row[col] for col in chunk_info['columns']]
+                
+                batch.append(row_values)
                 rows_imported += 1
                 
                 # Execute in batches
@@ -165,7 +177,7 @@ async def import_chunk(
                         table_name, 
                         chunk_info['columns'],
                         batch,
-                        'ODBC Driver' in connection_string  # Is SQL Server?
+                        is_sqlserver
                     )
                     print(f"Imported {rows_imported} rows")
                     batch = []
@@ -178,7 +190,7 @@ async def import_chunk(
                     table_name, 
                     chunk_info['columns'],
                     batch,
-                    'ODBC Driver' in connection_string  # Is SQL Server?
+                    is_sqlserver
                 )
                 print(f"Imported final {len(batch)} rows")
                 conn.commit()
@@ -228,13 +240,15 @@ def save_chunk_to_csv(filename: str, columns: List[str], data: List[Dict[str, An
 def generate_create_table_query(table_name: str, columns: List[str], is_sqlserver: bool = False) -> str:
     """Generate CREATE TABLE query with appropriate column types"""
     if is_sqlserver:
-        # Use NVARCHAR(MAX) for SQL Server to handle large text
+        # SQL Server syntax
         column_defs = [f'[{col}] NVARCHAR(MAX)' for col in columns]
         return f"""
             IF NOT EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'{table_name}') AND type in (N'U'))
-            CREATE TABLE {table_name} (
-                {', '.join(column_defs)}
-            )
+            BEGIN
+                CREATE TABLE {table_name} (
+                    {', '.join(column_defs)}
+                )
+            END
         """
     else:
         # Oracle syntax
@@ -248,7 +262,7 @@ def generate_create_table_query(table_name: str, columns: List[str], is_sqlserve
 def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[Any]], is_sqlserver: bool = False) -> None:
     """Import a batch of rows"""
     if is_sqlserver:
-        # SQL Server syntax
+        # SQL Server syntax with proper column quoting
         columns_str = ','.join([f'[{col}]' for col in columns])
         placeholders = ','.join(['?' for _ in columns])
         query = f"""
@@ -265,3 +279,4 @@ def import_batch(cursor, table_name: str, columns: List[str], batch: List[List[A
         """
     
     cursor.executemany(query, batch)
+```
