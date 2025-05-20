@@ -117,11 +117,11 @@ async def search_oracle_views(
         
         # Build the search condition with proper parameter binding
         where_clause = "WHERE object_type = 'VIEW'"
-        bind_vars = {}
+        bind_vars = []
         
         if search:
-            where_clause += " AND UPPER(object_name) LIKE UPPER(:search_pattern)"
-            bind_vars["search_pattern"] = f"%{search}%"  # Using wildcard before and after for more flexible matching
+            where_clause += " AND UPPER(object_name) LIKE UPPER(:1)"
+            bind_vars.append(f"%{search}%")  # Using positional binding
         
         # Get list of views with optimized query
         query = f"""
@@ -138,13 +138,10 @@ async def search_oracle_views(
                 'APEX_030200', 'FLOWS_FILES', 'APEX_PUBLIC_USER', 'OWBSYS', 'OWBSYS_AUDIT'
             )
             ORDER BY owner, object_name
-            OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
+            OFFSET :2 ROWS FETCH NEXT :3 ROWS ONLY
         """
         
-        bind_vars.update({
-            "offset": offset,
-            "limit": limit
-        })
+        bind_vars.extend([offset, limit])
         
         cursor.execute(query, bind_vars)
         tables_data = cursor.fetchall()
@@ -161,10 +158,10 @@ async def search_oracle_views(
                     data_length,
                     char_length
                 FROM all_tab_columns
-                WHERE owner = :owner
-                AND table_name = :table_name
+                WHERE owner = :1
+                AND table_name = :2
                 ORDER BY column_id
-            """, {"owner": schema_name, "table_name": table_name})
+            """, [schema_name, table_name])
             
             columns = []
             for col in cursor.fetchall():
@@ -191,9 +188,9 @@ async def search_oracle_views(
                 cursor.execute("""
                     SELECT num_rows 
                     FROM all_tables 
-                    WHERE owner = :owner
-                    AND table_name = :table_name
-                """, {"owner": schema_name, "table_name": table_name})
+                    WHERE owner = :1
+                    AND table_name = :2
+                """, [schema_name, table_name])
                 
                 count_result = cursor.fetchone()
                 
