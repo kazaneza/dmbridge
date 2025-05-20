@@ -121,7 +121,7 @@ async def search_oracle_views(
         
         if search:
             where_clause += " AND UPPER(object_name) LIKE UPPER(:search_pattern)"
-            bind_vars["search_pattern"] = f"{search}%"
+            bind_vars["search_pattern"] = f"%{search}%"  # Using wildcard before and after for more flexible matching
         
         # Get list of views with optimized query
         query = f"""
@@ -161,10 +161,10 @@ async def search_oracle_views(
                     data_length,
                     char_length
                 FROM all_tab_columns
-                WHERE owner = :1
-                AND table_name = :2
+                WHERE owner = :owner
+                AND table_name = :table_name
                 ORDER BY column_id
-            """, [schema_name, table_name])
+            """, {"owner": schema_name, "table_name": table_name})
             
             columns = []
             for col in cursor.fetchall():
@@ -191,9 +191,9 @@ async def search_oracle_views(
                 cursor.execute("""
                     SELECT num_rows 
                     FROM all_tables 
-                    WHERE owner = :1 
-                    AND table_name = :2
-                """, [schema_name, table_name])
+                    WHERE owner = :owner
+                    AND table_name = :table_name
+                """, {"owner": schema_name, "table_name": table_name})
                 
                 count_result = cursor.fetchone()
                 
@@ -206,12 +206,20 @@ async def search_oracle_views(
                     except:
                         pass
                     
-                    cursor.execute(f"""
-                        SELECT COUNT(*) 
-                        FROM {schema_name}.{table_name}
-                        WHERE ROWNUM <= 1000000
-                    """)
-                    count_result = cursor.fetchone()
+                    # For identifiers like schema and table names, we need to use 
+                    # string formatting - but must sanitize the identifiers first
+                    # to prevent SQL injection
+                    def is_valid_identifier(name):
+                        return all(c.isalnum() or c == '_' or c == '$' or c == '#' for c in name)
+                    
+                    if is_valid_identifier(schema_name) and is_valid_identifier(table_name):
+                        # It's safe to use these identifiers in our SQL
+                        count_query = f"SELECT COUNT(*) FROM {schema_name}.{table_name} WHERE ROWNUM <= 1000000"
+                        cursor.execute(count_query)
+                        count_result = cursor.fetchone()
+                    else:
+                        # Skip count for potentially unsafe identifiers
+                        pass
                     
                 if count_result and count_result[0] is not None:
                     row_count = count_result[0]

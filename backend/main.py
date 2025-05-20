@@ -12,6 +12,9 @@ from database import (
     search_oracle_views
 )
 from migration import extract_table_chunks, import_chunk
+import logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -156,6 +159,7 @@ async def get_schema(connection_id: str) -> List[DatabaseTable]:
 
 @app.post("/api/connections/{connection_id}/search")
 async def search_schema(connection_id: str, params: SearchParams) -> List[DatabaseTable]:
+    logger.debug(f"Search request received with params: {params}")
     # Get connection details
     conn = sqlite3.connect('connections.db')
     c = conn.cursor()
@@ -174,7 +178,10 @@ async def search_schema(connection_id: str, params: SearchParams) -> List[Databa
             conn_str = connection['connection_string']
             if not conn_str:
                 conn_str = f"{connection['username']}/{connection['password']}@{connection['host']}:{connection['port']}/{connection['database']}"
-            return await search_oracle_views(conn_str, params.search, params.limit, params.offset)
+                logger.debug("About to call search_oracle_views")
+                result = await search_oracle_views(conn_str, params.search, params.limit, params.offset)
+                logger.debug("search_oracle_views completed successfully")
+            return result
         else:
             raise HTTPException(status_code=400, detail="Search is only supported for Oracle connections")
             
@@ -186,6 +193,7 @@ async def search_schema(connection_id: str, params: SearchParams) -> List[Databa
                 "with the listener. Please verify the service name and ensure the listener "
                 "is running on the database server."
             )
+        logger.exception("Error during Oracle search")
         raise HTTPException(status_code=500, detail=error_message)
 
 @app.put("/api/connections/{connection_id}")
