@@ -210,8 +210,8 @@ async def search_oracle_views(
                         return all(c.isalnum() or c == '_' or c == '$' or c == '#' for c in name)
                     
                     if is_valid_identifier(schema_name) and is_valid_identifier(table_name):
-                        # It's safe to use these identifiers in our SQL
-                        count_query = f"SELECT COUNT(*) FROM {schema_name}.{table_name} WHERE ROWNUM <= 1000000"
+                        # Get actual row count without ROWNUM limitation
+                        count_query = f"SELECT COUNT(*) FROM {schema_name}.{table_name}"
                         cursor.execute(count_query)
                         count_result = cursor.fetchone()
                     else:
