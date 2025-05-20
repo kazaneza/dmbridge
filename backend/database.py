@@ -109,18 +109,22 @@ async def search_oracle_views(
         
         # Configure session for large data
         cursor.execute("ALTER SESSION SET NLS_LENGTH_SEMANTICS = 'CHAR'")
+        cursor.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'YYYY-MM-DD HH24:MI:SS'")
         cursor.arraysize = 1000  # Fetch 1000 rows at a time
         
         # Set large buffer size for CLOB/LONG columns
         cursor.setinputsizes(None, cx_Oracle.CLOB)
         
-        # Build the search condition
+        # Build the search condition with proper parameter binding
         where_clause = "WHERE object_type = 'VIEW'"
+        bind_vars = {}
+        
         if search:
-            where_clause += f" AND UPPER(object_name) LIKE UPPER('{search}%')"
+            where_clause += " AND UPPER(object_name) LIKE UPPER(:search_pattern)"
+            bind_vars["search_pattern"] = f"{search}%"
         
         # Get list of views with optimized query
-        cursor.execute(f"""
+        query = f"""
             SELECT /*+ FIRST_ROWS({limit}) */
                 owner AS schema_name,
                 object_name AS table_name
@@ -135,14 +139,20 @@ async def search_oracle_views(
             )
             ORDER BY owner, object_name
             OFFSET :offset ROWS FETCH NEXT :limit ROWS ONLY
-        """, {'offset': offset, 'limit': limit})
+        """
         
+        bind_vars.update({
+            "offset": offset,
+            "limit": limit
+        })
+        
+        cursor.execute(query, bind_vars)
         tables_data = cursor.fetchall()
         
         for table in tables_data:
             schema_name, table_name = table
             
-            # Get columns for this view with increased buffer size
+            # Get columns for this view
             cursor.execute("""
                 SELECT 
                     column_name,
@@ -175,10 +185,9 @@ async def search_oracle_views(
                     selected=True
                 ))
             
-            # Get the full row count for the view - FIXED SYNTAX
+            # Get the full row count for the view
             row_count = 0
             try:
-                # Try to get the row count from all_tables/all_objects if it exists there
                 cursor.execute("""
                     SELECT num_rows 
                     FROM all_tables 
@@ -188,42 +197,26 @@ async def search_oracle_views(
                 
                 count_result = cursor.fetchone()
                 
-                # If not found in all_tables, do a full count on the view
                 if not count_result or count_result[0] is None:
-                    # Set query timeout and enable query rewrite
                     cursor.execute("ALTER SESSION SET QUERY_REWRITE_ENABLED = TRUE")
                     cursor.execute("ALTER SESSION SET NLS_LENGTH_SEMANTICS = 'CHAR'")
                     
                     try:
                         cursor.execute("BEGIN DBMS_SESSION.SET_STATEMENT_TIMEOUT(30000); END;")
                     except:
-                        pass  # Skip if not supported
+                        pass
                     
-                    # Try to get the full count with increased buffer size
                     cursor.execute(f"""
-                        SELECT COUNT(*) FROM {schema_name}.{table_name}
+                        SELECT COUNT(*) 
+                        FROM {schema_name}.{table_name}
+                        WHERE ROWNUM <= 1000000
                     """)
                     count_result = cursor.fetchone()
                     
                 if count_result and count_result[0] is not None:
                     row_count = count_result[0]
-            except Exception as e:
-                # If counting fails, try a different approach with a sample
-                try:
-                    # Try a simpler count with rownum limit
-                    cursor.execute(f"""
-                        SELECT COUNT(*) FROM (
-                            SELECT 1 FROM {schema_name}.{table_name}
-                            WHERE ROWNUM <= 1000000
-                        )
-                    """)
-                    count_result = cursor.fetchone()
-                    if count_result and count_result[0]:
-                        row_count = count_result[0]
-                        if row_count == 1000000:
-                            row_count = 1000000
-                except Exception:
-                    pass
+            except Exception:
+                pass
             
             tables.append(DatabaseTable(
                 name=table_name,
@@ -235,14 +228,29 @@ async def search_oracle_views(
         
         return tables
         
+    except cx_Oracle.DatabaseError as e:
+        error_obj, = e.args
+        if error_obj.code == 12154:  # TNS:could not resolve service name
+            raise Exception("Could not connect to the database. Please verify the service name and connection details.")
+        elif error_obj.code == 1017:  # Invalid username/password
+            raise Exception("Invalid username or password.")
+        elif error_obj.code == 12541:  # No listener
+            raise Exception("Could not connect to the database. Please verify the host and port.")
+        else:
+            raise Exception(f"Database error: {str(e)}")
     except Exception as e:
         raise Exception(f"Error searching Oracle views: {str(e)}")
-        
     finally:
         if cursor:
-            cursor.close()
+            try:
+                cursor.close()
+            except:
+                pass
         if conn:
-            conn.close()
+            try:
+                conn.close()
+            except:
+                pass
 
 async def fetch_oracle_schema(connection_string: str) -> List[DatabaseTable]:
     # For Oracle, we'll use the search endpoint instead

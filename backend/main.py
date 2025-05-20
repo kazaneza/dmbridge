@@ -118,12 +118,13 @@ async def get_schema(connection_id: str) -> List[DatabaseTable]:
     c = conn.cursor()
     c.execute('SELECT * FROM connections WHERE id = ?', (connection_id,))
     row = c.fetchone()
-    conn.close()
     
     if not row:
+        conn.close()
         raise HTTPException(status_code=404, detail="Connection not found")
     
     connection = dict(zip([col[0] for col in c.description], row))
+    conn.close()
     
     try:
         if connection['type'] == 'mssql':
@@ -300,6 +301,7 @@ async def start_migration(request: MigrationRequest):
     c.execute('SELECT * FROM connections WHERE id = ?', (request.source_connection_id,))
     source_row = c.fetchone()
     if not source_row:
+        conn.close()
         raise HTTPException(status_code=404, detail="Source connection not found")
     source_conn = dict(zip([col[0] for col in c.description], source_row))
     
@@ -307,6 +309,7 @@ async def start_migration(request: MigrationRequest):
     c.execute('SELECT * FROM connections WHERE id = ?', (request.destination_connection_id,))
     dest_row = c.fetchone()
     if not dest_row:
+        conn.close()
         raise HTTPException(status_code=404, detail="Destination connection not found")
     dest_conn = dict(zip([col[0] for col in c.description], dest_row))
     
