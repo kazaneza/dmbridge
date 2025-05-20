@@ -117,7 +117,7 @@ async def search_oracle_views(
         # Build the search condition
         where_clause = "WHERE object_type = 'VIEW'"
         if search:
-            where_clause += f" AND object_name LIKE '{search.upper()}%'"
+            where_clause += f" AND UPPER(object_name) LIKE UPPER('{search}%')"
         
         # Get list of views with optimized query
         cursor.execute(f"""

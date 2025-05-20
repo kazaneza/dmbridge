@@ -160,12 +160,13 @@ async def search_schema(connection_id: str, params: SearchParams) -> List[Databa
     c = conn.cursor()
     c.execute('SELECT * FROM connections WHERE id = ?', (connection_id,))
     row = c.fetchone()
-    conn.close()
     
     if not row:
+        conn.close()
         raise HTTPException(status_code=404, detail="Connection not found")
     
     connection = dict(zip([col[0] for col in c.description], row))
+    conn.close()
     
     try:
         if connection['type'] == 'oracle':
